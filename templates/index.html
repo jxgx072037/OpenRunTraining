@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Strava 数据应用</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+            background-color: #f7f7f7;
+            color: #333;
+        }
+        .container {
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #FC4C02; /* Strava 橙色 */
+        }
+        .btn {
+            display: inline-block;
+            background-color: #FC4C02;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 4px;
+            text-decoration: none;
+            font-weight: bold;
+            margin-top: 20px;
+            transition: background-color 0.3s;
+        }
+        .btn:hover {
+            background-color: #E34402;
+        }
+        .logo {
+            width: 200px;
+            margin-bottom: 20px;
+        }
+        .description {
+            margin: 20px 0;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Strava 数据应用</h1>
+        <p class="description">连接您的 Strava 账户，查看您的运动数据和个人资料信息。</p>
+        <div class="buttons">
+            <a href="/authorize" class="btn">使用 Strava 账户登录</a>
+            {% if session.get('access_token') %}
+            <a href="/profile" class="btn" style="background-color: #4A90E2;">查看个人资料</a>
+            <a href="/activities" class="btn" style="background-color: #44AD4C;">查看我的活动</a>
+            <a href="/logout" class="btn" style="background-color: #888;">退出登录</a>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html> 

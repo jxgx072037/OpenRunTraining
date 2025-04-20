@@ -1,0 +1,13 @@
+[Unit]
+Description=Gunicorn instance to serve OpenRunTraining
+After=network.target
+
+[Service]
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/OpenRunTraining
+Environment="PATH=/home/ubuntu/.local/bin:/usr/bin"
+ExecStart=/home/ubuntu/.local/bin/gunicorn -c gunicorn_config.py app:app
+
+[Install]
+WantedBy=multi-user.target 

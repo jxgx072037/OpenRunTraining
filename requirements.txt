@@ -1,0 +1,5 @@
+Flask==2.0.1
+Werkzeug==2.0.1
+requests==2.28.2
+python-dotenv==1.0.0 
+polyline==1.4.0

@@ -1,0 +1,552 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>{{ activity.name }}</h2>
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-4">
+                    <p><strong>日期：</strong> {{ activity.start_date_local.split('T')[0] }}</p>
+                    <p><strong>距离：</strong> {{ "%.2f"|format(activity.distance/1000) }} 公里</p>
+                    <p><strong>时长：</strong> {{ "%d:%02d:%02d"|format(activity.moving_time//3600, (activity.moving_time%3600)//60, activity.moving_time%60) }}</p>
+                    <p><strong>平均速度：</strong> {{ "%.1f"|format(activity.average_speed * 3.6) }} km/h</p>
+                </div>
+                <div class="col-md-4">
+                    <p><strong>海拔增益：</strong> {{ activity.total_elevation_gain }} 米</p>
+                    <p><strong>平均心率：</strong> {% if activity.average_heartrate %}{{ activity.average_heartrate }}{% else %}N/A{% endif %}</p>
+                    <p><strong>最大心率：</strong> {% if activity.max_heartrate %}{{ activity.max_heartrate }}{% else %}N/A{% endif %}</p>
+                    <p><strong>运动类型：</strong> {{ activity.type }}</p>
+                </div>
+                <div class="col-md-4">
+                    <p><strong>卡路里：</strong> {% if activity.calories %}{{ activity.calories }}{% else %}N/A{% endif %}</p>
+                    <p><strong>功率：</strong> {% if activity.average_watts %}{{ "%.1f"|format(activity.average_watts) }} W{% else %}N/A{% endif %}</p>
+                    <p><strong>Kudos：</strong> {{ activity.kudos_count }}</p>
+                    <p><strong>成就：</strong> {{ activity.achievement_count }}</p>
+                </div>
+            </div>
+            {% if activity.description %}
+            <div class="row mt-3">
+                <div class="col-12">
+                    <p><strong>活动描述：</strong></p>
+                    <p>{{ activity.description }}</p>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    {% if points %}
+    <div class="card mb-4">
+        <div class="card-body">
+            <div id="map" style="height: 400px;"></div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if streams %}
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="mb-3">
+                <div class="metrics-toggles">
+                    <div class="metric-item">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch" id="paceToggle" data-metric="pace" checked>
+                            <label class="form-check-label metric-label" for="paceToggle">配速</label>
+                            <span class="metric-value" id="paceValue">-</span>
+                        </div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch" id="heartrateToggle" data-metric="heartrate" checked>
+                            <label class="form-check-label metric-label" for="heartrateToggle">心率</label>
+                            <span class="metric-value" id="heartrateValue">-</span>
+                        </div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch" id="cadenceToggle" data-metric="cadence">
+                            <label class="form-check-label metric-label" for="cadenceToggle">步频</label>
+                            <span class="metric-value" id="cadenceValue">-</span>
+                        </div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch" id="altitudeToggle" data-metric="altitude" checked>
+                            <label class="form-check-label metric-label" for="altitudeToggle">海拔</label>
+                            <span class="metric-value" id="altitudeValue">{{ activity.total_elevation_gain|round|int }} 米</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <style>
+                .metrics-toggles {
+                    display: flex;
+                    flex-direction: row;
+                    gap: 2rem;
+                    padding: 0.5rem;
+                    flex-wrap: wrap;
+                }
+                .metric-item {
+                    display: flex;
+                    align-items: center;
+                    padding: 0.25rem 0.5rem;
+                    background-color: #f8f9fa;
+                    border-radius: 8px;
+                }
+                .form-check {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                    margin: 0;
+                }
+                .metric-label {
+                    font-weight: 500;
+                    color: #212529;
+                    margin: 0;
+                    white-space: nowrap;
+                }
+                .metric-value {
+                    color: #6c757d;
+                    font-size: 0.9em;
+                    margin-left: 0.5rem;
+                    white-space: nowrap;
+                }
+                .form-check-input {
+                    width: 2.5em !important;
+                    height: 1.25em !important;
+                    margin: 0 !important;
+                    cursor: pointer;
+                }
+                .form-switch .form-check-input:checked {
+                    background-color: #0d6efd !important;
+                    border-color: #0d6efd !important;
+                }
+            </style>
+            <div class="activity-charts" style="height: 400px;">
+                <canvas id="activityChart"></canvas>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+    
+    {% if segments %}
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">分段成绩</h5>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>分段</th>
+                            <th>距离</th>
+                            <th>时间</th>
+                            {% if activity.type == 'Run' %}
+                            <th>配速</th>
+                            {% else %}
+                            <th>速度</th>
+                            {% endif %}
+                            <th>海拔增益</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for segment in segments %}
+                        <tr>
+                            <td>{{ loop.index }}</td>
+                            <td>{{ segment.distance_km }} 公里</td>
+                            <td>{{ segment.formatted_time }}</td>
+                            {% if activity.type == 'Run' %}
+                            <td>{{ segment.pace }} 分钟/公里</td>
+                            {% else %}
+                            <td>{{ segment.speed }} 公里/小时</td>
+                            {% endif %}
+                            <td>{{ segment.elevation_gain }} 米</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+{% if points %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var map = L.map('map');
+    var currentMarker = null;  // 用于存储当前的标记
+    
+    // 使用 OpenTopoMap 地形图层
+    L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+        attribution: 'Map data: © OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap (CC-BY-SA)',
+        maxZoom: 17
+    }).addTo(map);
+    
+    var points = {{ points|tojson }};
+    
+    if (points && points.length > 0) {
+        // 创建路线，使用更细的线条
+        var polyline = L.polyline(points, {
+            color: 'red',
+            weight: 2,  // 减小线宽
+            smoothFactor: 1  // 增加平滑度
+        }).addTo(map);
+        
+        // 添加起点标记
+        {% if start_lat and start_lng %}
+        L.marker([{{ start_lat }}, {{ start_lng }}]).addTo(map);
+        {% endif %}
+        
+        // 自动调整地图视野以适应路线
+        map.fitBounds(polyline.getBounds());
+    }
+
+    // 导出map变量到全局作用域，以便图表交互使用
+    window.activityMap = map;
+    window.activityPoints = points;
+});
+</script>
+{% endif %}
+
+{% if streams %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var ctx = document.getElementById('activityChart').getContext('2d');
+    var streams = {{ streams|tojson }};
+    var activity = {{ activity|tojson }};
+    var myChart = null;
+    
+    // 定义数据集配置
+    const datasetConfigs = {
+        pace: {
+            label: '配速 (分钟/公里)',
+            data: streams.pace,
+            yAxisID: 'y-pace',
+            borderColor: '#2196F3',
+            backgroundColor: 'rgba(33, 150, 243, 0.1)',
+            hidden: false
+        },
+        heartrate: {
+            label: '心率 (bpm)',
+            data: streams.heartrate,
+            yAxisID: 'y-heartrate',
+            borderColor: '#F44336',
+            backgroundColor: 'rgba(244, 67, 54, 0.1)',
+            hidden: false
+        },
+        cadence: {
+            label: '步频 (spm)',
+            data: streams.cadence,
+            yAxisID: 'y-cadence',
+            borderColor: '#FF9800',
+            backgroundColor: 'rgba(255, 152, 0, 0.1)',
+            hidden: true
+        },
+        altitude: {
+            label: '海拔 (m)',
+            data: streams.altitude,
+            yAxisID: 'y-altitude',
+            borderColor: '#757575',
+            backgroundColor: 'rgba(158, 158, 158, 0.2)',
+            fill: true,
+            hidden: false
+        }
+    };
+
+    // 创建图表
+    function createChart() {
+        const datasets = Object.entries(datasetConfigs).map(([key, config]) => ({
+            ...config,
+            borderWidth: 1.5,
+            pointRadius: 0,
+            cubicInterpolationMode: 'monotone',
+            tension: 0.7,
+            spanGaps: true
+        }));
+
+        myChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: streams.distance,
+                datasets: datasets
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false
+                },
+                scales: {
+                    x: {
+                        type: 'linear',
+                        title: {
+                            display: true,
+                            text: '距离 (km)'
+                        },
+                        ticks: {
+                            stepSize: 1,
+                            maxTicksLimit: 15,
+                            padding: 10,
+                            callback: function(value, index) {
+                                let closestIndex = streams.distance.findIndex(d => Math.abs(d - value) < 0.1);
+                                if (closestIndex !== -1 && streams.time[closestIndex]) {
+                                    return [
+                                        `${value}km`,
+                                        streams.time[closestIndex]
+                                    ];
+                                }
+                                return `${value}km`;
+                            }
+                        }
+                    },
+                    'y-pace': {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        reverse: true,
+                        title: {
+                            display: true,
+                            text: '配速 (分钟/公里)'
+                        },
+                        grid: {
+                            drawOnChartArea: false
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return value.toFixed(1);
+                            }
+                        },
+                        min: Math.max(0, streams.pace_range[0] - (streams.pace_range[1] - streams.pace_range[0]) * 0.05),
+                        max: streams.pace_range[1] + (streams.pace_range[1] - streams.pace_range[0]) * 0.05
+                    },
+                    'y-heartrate': {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        title: {
+                            display: true,
+                            text: '心率 (bpm)'
+                        },
+                        grid: {
+                            drawOnChartArea: false
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return Math.round(value);
+                            }
+                        },
+                        min: Math.max(0, streams.heartrate_range[0] - (streams.heartrate_range[1] - streams.heartrate_range[0]) * 0.05),
+                        max: streams.heartrate_range[1] + (streams.heartrate_range[1] - streams.heartrate_range[0]) * 0.05
+                    },
+                    'y-cadence': {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        title: {
+                            display: true,
+                            text: '步频 (spm)'
+                        },
+                        grid: {
+                            drawOnChartArea: false
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return Math.round(value);
+                            }
+                        },
+                        min: Math.max(0, streams.cadence_range[0] - (streams.cadence_range[1] - streams.cadence_range[0]) * 0.05),
+                        max: streams.cadence_range[1] + (streams.cadence_range[1] - streams.cadence_range[0]) * 0.05
+                    },
+                    'y-altitude': {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        title: {
+                            display: true,
+                            text: '海拔 (m)'
+                        },
+                        grid: {
+                            drawOnChartArea: false
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return Math.round(value);
+                            }
+                        },
+                        min: Math.max(0, streams.altitude_range[0] - (streams.altitude_range[1] - streams.altitude_range[0]) * 0.05),
+                        max: streams.altitude_range[1] + (streams.altitude_range[1] - streams.altitude_range[0]) * 0.05
+                    }
+                },
+                plugins: {
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) {
+                                    label += ': ';
+                                }
+                                if (context.parsed.y !== null) {
+                                    if (context.dataset.yAxisID === 'y-pace') {
+                                        label += context.parsed.y.toFixed(1) + ' 分钟/公里';
+                                    } else if (context.dataset.yAxisID === 'y-heartrate') {
+                                        label += Math.round(context.parsed.y) + ' bpm';
+                                    } else if (context.dataset.yAxisID === 'y-cadence') {
+                                        label += Math.round(context.parsed.y) + ' spm';
+                                    } else if (context.dataset.yAxisID === 'y-altitude') {
+                                        label += Math.round(context.parsed.y) + ' m';
+                                    }
+                                }
+                                return label;
+                            }
+                        }
+                    }
+                },
+                onHover: function(event, elements) {
+                    if (!window.activityMap || !window.activityPoints) return;
+                    
+                    // 移除之前的标记
+                    if (window.currentMarker) {
+                        window.activityMap.removeLayer(window.currentMarker);
+                        window.currentMarker = null;
+                    }
+                    
+                    if (elements && elements.length > 0) {
+                        const index = elements[0].index;
+                        const currentDistance = streams.distance[index];
+                        
+                        // 找到最接近当前距离的地图点
+                        let closestPointIndex = 0;
+                        let minDistanceDiff = Infinity;
+                        
+                        // 计算每个地图点的累计距离
+                        for (let i = 0; i < window.activityPoints.length; i++) {
+                            if (i === 0) continue;
+                            const prevPoint = window.activityPoints[i - 1];
+                            const currPoint = window.activityPoints[i];
+                            const d = getDistanceFromLatLonInKm(prevPoint[0], prevPoint[1], currPoint[0], currPoint[1]);
+                            const totalDistance = (i / window.activityPoints.length) * (streams.distance[streams.distance.length - 1]);
+                            
+                            const diff = Math.abs(totalDistance - currentDistance);
+                            if (diff < minDistanceDiff) {
+                                minDistanceDiff = diff;
+                                closestPointIndex = i;
+                            }
+                        }
+                        
+                        const point = window.activityPoints[closestPointIndex];
+                        // 创建新标记
+                        window.currentMarker = L.marker([point[0], point[1]], {
+                            icon: L.divIcon({
+                                className: 'custom-div-icon',
+                                html: `
+                                    <div class="marker-pin"></div>
+                                `,
+                                iconSize: [30, 30],
+                                iconAnchor: [15, 15]
+                            })
+                        }).addTo(window.activityMap);
+                    }
+                }
+            }
+        });
+    }
+
+    // 计算两个坐标点之间的距离（单位：公里）
+    function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
+        const R = 6371; // 地球半径（公里）
+        const dLat = deg2rad(lat2 - lat1);
+        const dLon = deg2rad(lon2 - lon1);
+        const a = 
+            Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * 
+            Math.sin(dLon/2) * Math.sin(dLon/2); 
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+        return R * c;
+    }
+
+    function deg2rad(deg) {
+        return deg * (Math.PI/180);
+    }
+
+    // 初始化图表
+    createChart();
+
+    // 处理开关点击事件
+    document.querySelectorAll('.form-check-input').forEach(toggle => {
+        toggle.addEventListener('change', function() {
+            const metric = this.dataset.metric;
+            const isActive = this.checked;
+            
+            // 更新数据集显示状态
+            const dataset = myChart.data.datasets.find(ds => ds.label === datasetConfigs[metric].label);
+            dataset.hidden = !isActive;
+            
+            // 更新图表
+            myChart.update();
+        });
+    });
+
+    // 更新指标值显示
+    function updateMetricValues() {
+        // 显示配速
+        if (activity.average_speed) {
+            const avgPace = (1000 / activity.average_speed / 60).toFixed(1);
+            document.getElementById('paceValue').textContent = avgPace + ' 分钟/公里';
+        }
+
+        // 显示平均心率
+        if (activity.average_heartrate) {
+            document.getElementById('heartrateValue').textContent = 
+                Math.round(activity.average_heartrate) + ' bpm';
+        }
+
+        // 显示平均步频
+        if (activity.average_cadence) {
+            const doubleCadence = Math.round(activity.average_cadence * 2);
+            document.getElementById('cadenceValue').textContent = doubleCadence + ' spm';
+        }
+    }
+
+    // 初始化时更新一次当前值
+    updateMetricValues();
+});
+</script>
+
+<style>
+.custom-div-icon {
+    background: none;
+    border: none;
+}
+.marker-pin {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background-color: red;
+    border: 3px solid white;
+    box-shadow: 0 0 4px rgba(0,0,0,0.5);
+    animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+    0% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    50% {
+        transform: scale(1.2);
+        opacity: 0.8;
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+</style>
+{% endif %}
+{% endblock %} 

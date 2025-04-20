@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的活动 - Strava 数据应用</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f7f7f7;
+            color: #333;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 30px auto;
+            padding: 20px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #FC4C02; /* Strava 橙色 */
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .user-info {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #eee;
+        }
+        .user-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            margin-right: 15px;
+            object-fit: cover;
+        }
+        .user-name {
+            font-size: 18px;
+            font-weight: bold;
+            margin: 0;
+        }
+        .btn {
+            display: inline-block;
+            background-color: #FC4C02;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 4px;
+            text-decoration: none;
+            font-weight: bold;
+            transition: background-color 0.3s;
+            margin-right: 10px;
+        }
+        .btn:hover {
+            background-color: #E34402;
+        }
+        .nav-links {
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #e1e1e1;
+        }
+        th {
+            background-color: #f5f5f5;
+            font-weight: bold;
+        }
+        tr:hover {
+            background-color: #f9f9f9;
+        }
+        .activity-type {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: white;
+            background-color: #767676;
+            text-transform: capitalize;
+        }
+        .activity-type.Run {
+            background-color: #5b9bd5;
+        }
+        .activity-type.Ride {
+            background-color: #fc4c02;
+        }
+        .activity-type.Swim {
+            background-color: #2cbe4e;
+        }
+        .activity-type.Hike {
+            background-color: #9c27b0;
+        }
+        .activity-type.Walk {
+            background-color: #ff9800;
+        }
+        .pagination {
+            display: flex;
+            justify-content: center;
+            margin-top: 20px;
+        }
+        .pagination a {
+            margin: 0 5px;
+            padding: 8px 12px;
+            text-decoration: none;
+            background-color: #f1f1f1;
+            color: #333;
+            border-radius: 4px;
+            transition: background-color 0.3s;
+        }
+        .pagination a:hover {
+            background-color: #ddd;
+        }
+        .pagination a.active {
+            background-color: #FC4C02;
+            color: white;
+        }
+        .empty-state {
+            text-align: center;
+            margin: 40px 0;
+            color: #888;
+        }
+        .activity-name {
+            font-weight: bold;
+            color: #333;
+            text-decoration: none;
+        }
+        .activity-name:hover {
+            color: #FC4C02;
+            text-decoration: underline;
+        }
+        #map {
+            width: 100%;
+            height: 400px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        .year-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            overflow-x: auto;
+            padding-bottom: 10px;
+        }
+        
+        .year-tab {
+            padding: 8px 16px;
+            background-color: #f1f1f1;
+            border-radius: 20px;
+            cursor: pointer;
+            text-decoration: none;
+            color: #333;
+            white-space: nowrap;
+        }
+        
+        .year-tab.active {
+            background-color: #FC4C02;
+            color: white;
+        }
+        
+        .stats-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #FC4C02;
+            margin: 10px 0;
+        }
+        
+        .stat-label {
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .polyline {
+            stroke: #FC4C02;
+            stroke-width: 2;
+            stroke-opacity: 0.6;
+        }
+        
+        .polyline:hover {
+            stroke-opacity: 1;
+            stroke-width: 3;
+        }
+        
+        /* 自定义地图控件样式 */
+        .leaflet-control-attribution {
+            font-size: 10px !important;
+            background-color: rgba(255, 255, 255, 0.7) !important;
+        }
+        
+        .leaflet-control-zoom {
+            border: none !important;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1) !important;
+        }
+        
+        .leaflet-control-zoom a {
+            background-color: white !important;
+            color: #666 !important;
+            border: 1px solid #eee !important;
+        }
+        
+        .leaflet-control-zoom a:hover {
+            background-color: #f8f8f8 !important;
+            color: #333 !important;
+        }
+        
+        .view-all-button button {
+            background-color: white !important;
+            color: #666 !important;
+            border: 1px solid #eee !important;
+            padding: 8px 16px !important;
+            border-radius: 4px !important;
+            cursor: pointer !important;
+            font-size: 13px !important;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1) !important;
+            transition: all 0.3s ease !important;
+        }
+        
+        .view-all-button button:hover {
+            background-color: #f8f8f8 !important;
+            color: #333 !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        {% if athlete %}
+        <div class="user-info">
+            <img src="{{ athlete.profile or athlete.profile_medium or 'https://www.strava.com/images/default-avatar-50.png' }}" alt="{{ athlete.firstname }} {{ athlete.lastname }}" class="user-avatar">
+            <h2 class="user-name">{{ athlete.firstname }} {{ athlete.lastname }}的活动</h2>
+        </div>
+        {% endif %}
+        
+        <div class="nav-links">
+            <div>
+                <a href="/profile" class="btn">个人资料</a>
+                <a href="/" class="btn">首页</a>
+                <a href="/logout" class="btn" style="background-color: #888;">退出登录</a>
+            </div>
+        </div>
+
+        <div id="map"></div>
+        
+        <div class="year-tabs">
+            {% for year in years %}
+            <a href="{{ url_for('activities', year=year) }}" 
+               class="year-tab {% if year == selected_year %}active{% endif %}">
+                {{ year }}年
+            </a>
+            {% endfor %}
+        </div>
+        
+        <div class="stats-container">
+            <div class="stat-card">
+                <div class="stat-value">{{ stats.count }}</div>
+                <div class="stat-label">活动次数</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ stats.total_distance_km }}</div>
+                <div class="stat-label">总距离（公里）</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ stats.formatted_total_time }}</div>
+                <div class="stat-label">总时长</div>
+            </div>
+        </div>
+        
+        {% if activities %}
+        <table>
+            <thead>
+                <tr>
+                    <th>活动名称</th>
+                    <th>类型</th>
+                    <th>日期</th>
+                    <th>距离</th>
+                    <th>时间</th>
+                    <th>均速</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for activity in activities %}
+                <tr>
+                    <td>
+                        <a href="{{ url_for('activity_detail', activity_id=activity.id) }}" class="activity-name">
+                            {{ activity.name }}
+                        </a>
+                    </td>
+                    <td>
+                        <span class="activity-type {{ activity.type }}">{{ activity.type }}</span>
+                    </td>
+                    <td>{{ activity.formatted_date }}</td>
+                    <td>{{ "%.1f"|format(activity.distance / 1000) }} 公里</td>
+                    <td>{{ activity.formatted_time }}</td>
+                    <td>{{ activity.pace }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <h3>暂无活动数据</h3>
+            <p>该时间段内还没有记录任何活动。</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script>
+        // 初始化地图
+        var map = L.map('map', {
+            zoomControl: true,
+            attributionControl: true,
+            // 禁用其他控件
+            boxZoom: false,
+            doubleClickZoom: true,
+            dragging: true,
+            keyboard: true,
+            scrollWheelZoom: true,
+            tap: true,
+            touchZoom: true,
+            // 自定义缩放控件位置
+            zoomControl: false
+        });
+        
+        // 添加缩放控件到右上角
+        L.control.zoom({
+            position: 'topright'
+        }).addTo(map);
+        
+        // 使用 CartoDB Positron 作为底图
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+            subdomains: 'abcd',
+            maxZoom: 19,
+            minZoom: 3
+        }).addTo(map);
+
+        // 添加所有活动的路线
+        var bounds = L.latLngBounds();
+        var hasValidBounds = false;
+        
+        // 用于存储所有活动的起始点
+        var startPoints = [];
+        var activityCount = 0;
+        
+        {% for activity in activities %}
+            {% if activity.decoded_polyline %}
+                var coordinates = {{ activity.decoded_polyline|tojson }};
+                if (coordinates && coordinates.length > 0) {
+                    // 记录起始点
+                    startPoints.push({
+                        lat: coordinates[0][0],
+                        lng: coordinates[0][1]
+                    });
+                    activityCount++;
+                    
+                    var polyline = L.polyline(coordinates, {
+                        color: '#FC4C02',
+                        weight: 3,
+                        opacity: 0.8,
+                        lineJoin: 'round',
+                        lineCap: 'round',
+                        className: 'polyline'
+                    }).addTo(map);
+                    
+                    // 添加悬停效果
+                    polyline.on('mouseover', function() {
+                        this.setStyle({
+                            opacity: 1,
+                            weight: 4
+                        });
+                    }).on('mouseout', function() {
+                        this.setStyle({
+                            opacity: 0.8,
+                            weight: 3
+                        });
+                    });
+                    
+                    // 添加点击事件
+                    polyline.on('click', function() {
+                        window.location.href = "{{ url_for('activity_detail', activity_id=activity.id) }}";
+                    });
+                    
+                    // 扩展边界框
+                    bounds.extend(polyline.getBounds());
+                    hasValidBounds = true;
+                }
+            {% endif %}
+        {% endfor %}
+        
+        // 如果有活动数据，分析最常见的活动区域
+        if (startPoints.length > 0) {
+            // 计算活动点的聚类
+            var clusters = {};
+            var gridSize = 0.1; // 约10公里的网格大小
+            
+            startPoints.forEach(function(point) {
+                // 将坐标点归类到网格
+                var gridLat = Math.round(point.lat / gridSize) * gridSize;
+                var gridLng = Math.round(point.lng / gridSize) * gridSize;
+                var gridKey = gridLat + ',' + gridLng;
+                
+                if (!clusters[gridKey]) {
+                    clusters[gridKey] = {
+                        count: 0,
+                        lat: gridLat,
+                        lng: gridLng
+                    };
+                }
+                clusters[gridKey].count++;
+            });
+            
+            // 找出活动最多的区域
+            var maxCount = 0;
+            var mostActiveArea = null;
+            
+            Object.values(clusters).forEach(function(cluster) {
+                if (cluster.count > maxCount) {
+                    maxCount = cluster.count;
+                    mostActiveArea = cluster;
+                }
+            });
+            
+            if (mostActiveArea) {
+                // 将地图聚焦到最活跃的区域
+                map.setView([mostActiveArea.lat, mostActiveArea.lng], 12);
+            } else {
+                // 如果无法确定最活跃区域，则显示所有活动范围
+                map.fitBounds(bounds, {
+                    padding: [50, 50],
+                    maxZoom: 12
+                });
+            }
+        } else {
+            // 如果没有活动数据，显示默认位置（北京）
+            map.setView([39.9042, 116.4074], 10);
+        }
+        
+        // 添加一个按钮，允许查看所有活动范围
+        if (hasValidBounds) {
+            var viewAllButton = L.control({position: 'topright'});
+            viewAllButton.onAdd = function(map) {
+                var div = L.DomUtil.create('div', 'view-all-button');
+                div.innerHTML = '<button>查看所有活动</button>';
+                div.onclick = function() {
+                    map.fitBounds(bounds, {
+                        padding: [50, 50],
+                        maxZoom: 12
+                    });
+                };
+                return div;
+            };
+            viewAllButton.addTo(map);
+        }
+    </script>
+</body>
+</html> 
