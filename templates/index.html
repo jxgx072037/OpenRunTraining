@@ -1,65 +1,885 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Strava 数据应用</title>
+{% extends "base.html" %}
+
+{% block title %}比赛路线{% endblock %}
+
+{% block extra_css %}
     <style>
-        body {
-            font-family: 'Arial', sans-serif;
-            text-align: center;
-            margin: 0;
-            padding: 0;
-            background-color: #f7f7f7;
-            color: #333;
-        }
-        .container {
-            max-width: 800px;
-            margin: 50px auto;
-            padding: 20px;
-            background-color: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-        }
-        h1 {
-            color: #FC4C02; /* Strava 橙色 */
-        }
-        .btn {
-            display: inline-block;
+    .upload-container {
+        text-align: left;
+        padding: 30px;
+        margin-bottom: 20px;
+        background-color: #f8f9fa;
+        border-radius: 8px;
+        border: 2px dashed #ddd;
+    }
+    
+    .upload-form {
+        max-width: 600px;
+        margin: 0 auto;
+    }
+    
+    .form-group {
+        margin-bottom: 20px;
+    }
+    
+    .form-group label {
+        display: block;
+        margin-bottom: 6px;
+        color: #666;
+        font-weight: 500;
+    }
+    
+    .required::after {
+        content: "*";
+        color: #FC4C02;
+        margin-left: 4px;
+    }
+    
+    .form-group input[type="text"] {
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+    }
+    
+    .form-group input[type="date"] {
+        padding: 7px 12px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+    }
+    
+    .file-input-group {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+    }
+    
+    .file-name {
+        color: #666;
+        font-size: 14px;
+        margin-left: 10px;
+    }
+    
+    #file-input {
+        display: none;
+    }
+    
+    .custom-file-upload {
+        display: inline-flex;
+        align-items: center;
+        padding: 8px 20px;
+        background-color: #FC4C02;
+        color: white;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: background-color 0.3s;
+        font-size: 14px;
+    }
+    
+    .custom-file-upload i {
+        margin-right: 8px;
+    }
+    
+    .submit-btn {
+        display: inline-flex;
+        align-items: center;
+        padding: 10px 25px;
             background-color: #FC4C02;
             color: white;
-            padding: 12px 24px;
+        border: none;
             border-radius: 4px;
-            text-decoration: none;
-            font-weight: bold;
-            margin-top: 20px;
+        cursor: pointer;
             transition: background-color 0.3s;
+        font-size: 15px;
+        font-weight: 500;
         }
-        .btn:hover {
+    
+    .submit-btn:hover, .custom-file-upload:hover {
             background-color: #E34402;
         }
-        .logo {
-            width: 200px;
+    
+    .submit-btn:disabled, .custom-file-upload.disabled {
+        background-color: #ccc;
+        cursor: not-allowed;
+    }
+    
+    .submit-btn i {
+        margin-right: 8px;
+    }
+    
+    .upload-title {
+        margin-bottom: 15px;
+        color: #666;
+        font-size: 20px;
+    }
+    
+    .upload-description {
+        color: #888;
+        margin-bottom: 20px;
+        font-size: 14px;
+    }
+    
+    #data-container {
+        display: none;
+    }
+    
+    /* 从gpx_viewer.html复制的样式 */
+    .map-container {
+        height: 600px;
+        margin-bottom: 20px;
+        border-radius: 8px;
+        overflow: hidden;
+        display: none;
+        position: relative;
+    }
+    
+    .elevation-chart {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 200px;
+        background: rgba(255, 255, 255, 0.7);
+        z-index: 1000;
+        padding: 10px;
+    }
+    
+    .stats-container {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 20px;
+        margin-bottom: 30px;
+    }
+    
+    .stat-card {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        text-align: center;
+    }
+    
+    .stat-value {
+        font-size: 24px;
+        font-weight: bold;
+        color: #FC4C02;
+        margin: 10px 0;
+    }
+    
+    .stat-label {
+        color: #666;
+        font-size: 14px;
+    }
+    
+    .loading {
+        display: none;
+        text-align: center;
+        padding: 20px;
+        font-size: 18px;
+        color: #666;
+    }
+    
+    .loading i {
+        margin-right: 10px;
+        color: #FC4C02;
+    }
+    
+    .hover-marker {
+        transition: opacity 0.3s ease;
+    }
+    
+    .formula-note {
+        color: #666;
+        font-size: 12px;
+        margin-top: 8px;
+        font-style: italic;
+        line-height: 1.3;
+    }
+    
+    .segment-table-container {
+        margin-top: 30px;
+        margin-bottom: 30px;
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    }
+    
+    .segment-table-container h3 {
             margin-bottom: 20px;
+        color: #333;
+    }
+    
+    .table {
+        width: 100%;
+        margin-bottom: 0;
+    }
+    
+    .table th {
+        background-color: #f8f9fa;
+        border-top: none;
+        color: #666;
+        font-weight: 600;
+    }
+    
+    .table td, .table th {
+        padding: 12px;
+        text-align: center;
+        vertical-align: middle;
+    }
+    
+    .table tbody tr:hover {
+        background-color: #f8f9fa;
         }
-        .description {
-            margin: 20px 0;
-            line-height: 1.6;
-        }
+    
+    .map-weather-container {
+        display: flex;
+        gap: 20px;
+        margin-bottom: 30px;
+    }
+    
+    .map-container {
+        flex: 2;
+        margin-bottom: 0;
+    }
+    
+    .weather-container {
+        flex: 1;
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        display: none;
+        height: 600px;  /* 设置与地图相同的高度 */
+    }
+    
+    .weather-title {
+        font-size: 16px;
+        color: #666;
+        margin-bottom: 15px;
+        font-weight: 500;
+    }
+    
+    .weather-data {
+        margin-bottom: 20px;
+    }
+    
+    .weather-table {
+        width: 100%;
+        font-size: 13px;
+    }
+    
+    .weather-table th {
+        text-align: left;
+        color: #666;
+        font-weight: 500;
+        padding: 8px 4px;
+        border-bottom: 1px solid #eee;
+    }
+    
+    .weather-table td {
+        padding: 8px 4px;
+        border-bottom: 1px solid #eee;
+    }
+    
+    .weather-source {
+        font-size: 12px;
+        color: #888;
+        margin-top: 10px;
+        text-align: right;
+    }
+    
+    .weather-source a {
+        color: #FC4C02;
+        text-decoration: none;
+    }
+    
+    .weather-source a:hover {
+        text-decoration: underline;
+    }
+    
+    .loading-weather {
+        display: none;
+        text-align: center;
+        padding: 20px;
+        font-size: 18px;
+        color: #666;
+    }
+    
+    .loading-weather i {
+        margin-right: 10px;
+        color: #FC4C02;
+    }
     </style>
-</head>
-<body>
+{% endblock %}
+
+{% block content %}
     <div class="container">
-        <h1>Strava 数据应用</h1>
-        <p class="description">连接您的 Strava 账户，查看您的运动数据和个人资料信息。</p>
-        <div class="buttons">
-            <a href="/authorize" class="btn">使用 Strava 账户登录</a>
-            {% if session.get('access_token') %}
-            <a href="/profile" class="btn" style="background-color: #4A90E2;">查看个人资料</a>
-            <a href="/activities" class="btn" style="background-color: #44AD4C;">查看我的活动</a>
-            <a href="/logout" class="btn" style="background-color: #888;">退出登录</a>
-            {% endif %}
+    <div class="upload-container">
+        <h2 class="upload-title">上传比赛路线</h2>
+        <p class="upload-description">上传GPX格式的比赛路线文件，并填写相关信息，开始规划您的训练计划。</p>
+        <form id="upload-form" class="upload-form" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="race-name">比赛名称</label>
+                <input type="text" id="race-name" name="race_name" placeholder="例如：2024杭州马拉松">
+            </div>
+            
+            <div class="form-group">
+                <label for="file-input" class="required">比赛轨迹</label>
+                <div class="file-input-group">
+                    <label for="file-input" class="custom-file-upload" id="upload-label">
+                        <i class="fas fa-upload"></i> 选择GPX文件
+                    </label>
+                    <input type="file" id="file-input" name="gpx_file" accept=".gpx">
+                    <span class="file-name" id="file-name"></span>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label for="race-date" class="required">比赛日期</label>
+                <input type="date" id="race-date" name="race_date" required>
+            </div>
+            
+            <button type="submit" class="submit-btn" id="submit-btn" disabled>
+                <i class="fas fa-check"></i> 确认上传
+            </button>
+        </form>
+    </div>
+    
+    <div class="loading" id="loading">
+        <i class="fas fa-spinner fa-spin"></i> <span id="loading-text">正在解析GPX文件...</span>
+    </div>
+    
+    <div id="data-container">
+        <div class="map-weather-container">
+            <div id="map" class="map-container">
+                <div class="elevation-chart">
+                    <canvas id="elevationChart"></canvas>
+                </div>
+            </div>
+            
+            <div class="weather-container" id="weather-container">
+                <h3 class="weather-title">历史天气数据</h3>
+                <div class="loading-weather" id="loading-weather">
+                    <i class="fas fa-spinner fa-spin"></i> 正在获取历史天气数据...
+                </div>
+                <div class="weather-data">
+                    
+                    <table class="weather-table">
+                        <thead>
+                            <tr>
+                                <th>年份</th>
+                                <th>温度</th>
+                                <th>湿度</th>
+                                <th>降水</th>
+                                <th>风速</th>
+                            </tr>
+                        </thead>
+                        <tbody id="weather-table-body">
+                        </tbody>
+                    </table>
+                </div>
+                <div class="weather-source">
+                    数据来源：<a href="https://www.visualcrossing.com/" target="_blank">Visual Crossing Weather</a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="stats-container">
+            <div class="stat-card">
+                <div class="stat-value" id="total-distance">-</div>
+                <div class="stat-label">总距离（公里）</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="total-elevation-gain">-</div>
+                <div class="stat-label">总爬升（米）</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="average-grade">-</div>
+                <div class="stat-label">平均爬升坡度</div>
+                <div class="formula-note">坡度（%）=（垂直爬升高度 / 水平距离）× 100%</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="total-elevation-loss">-</div>
+                <div class="stat-label">总下降（米）</div>
+            </div>
+        </div>
+        
+        <div class="segment-table-container">
+            <h3>分段数据</h3>
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>段号</th>
+                            <th>累计距离(km)</th>
+                            <th>爬升(m)</th>
+                            <th>平均爬升坡度(%)</th>
+                            <th>下降(m)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="segment-table-body">
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
-</body>
-</html> 
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // 缓存DOM元素
+    const elements = {
+        form: document.getElementById('upload-form'),
+        fileInput: document.getElementById('file-input'),
+        fileName: document.getElementById('file-name'),
+        raceName: document.getElementById('race-name'),
+        raceDate: document.getElementById('race-date'),
+        submitBtn: document.getElementById('submit-btn'),
+        uploadLabel: document.getElementById('upload-label'),
+        loadingDiv: document.getElementById('loading'),
+        dataContainer: document.getElementById('data-container'),
+        mapContainer: document.getElementById('map'),
+        totalDistance: document.getElementById('total-distance'),
+        totalElevationGain: document.getElementById('total-elevation-gain'),
+        totalElevationLoss: document.getElementById('total-elevation-loss'),
+        averageGrade: document.getElementById('average-grade'),
+        elevationChart: document.getElementById('elevationChart'),
+        weatherContainer: document.getElementById('weather-container'),
+    };
+    
+    let map = null;
+    let chart = null;
+    let hoverMarker = null;
+    let allPoints = [];
+    
+    // 设置日期默认值为今天
+    const today = new Date().toISOString().split('T')[0];
+    elements.raceDate.value = today;
+    
+    // 检查表单是否可以提交
+    function checkFormValidity() {
+        const hasFile = elements.fileInput.files.length > 0;
+        const hasDate = elements.raceDate.value.trim() !== '';
+        elements.submitBtn.disabled = !(hasFile && hasDate);
+    }
+    
+    // 显示文件名
+    elements.fileInput.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (file) {
+            elements.fileName.textContent = file.name;
+        } else {
+            elements.fileName.textContent = '';
+        }
+        checkFormValidity();
+    });
+    
+    // 监听日期变化
+    elements.raceDate.addEventListener('change', checkFormValidity);
+    
+    // 处理表单提交
+    elements.form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const file = elements.fileInput.files[0];
+        const raceDate = elements.raceDate.value;
+        const raceName = elements.raceName.value;
+        
+        if (!file || !raceDate) {
+            alert('请选择GPX文件并填写比赛日期');
+            return;
+        }
+        
+        await handleFileUpload(file, raceDate, raceName);
+    });
+    
+    // 处理文件上传
+    async function handleFileUpload(file, raceDate, raceName) {
+        try {
+            elements.loadingDiv.style.display = 'block';
+            document.getElementById('loading-text').textContent = '正在解析GPX文件...';
+            elements.submitBtn.disabled = true;
+            elements.uploadLabel.classList.add('disabled');
+            elements.dataContainer.style.display = 'none';
+            
+            const formData = new FormData();
+            formData.append('gpx_file', file);
+            formData.append('race_date', raceDate);
+            if (raceName) {
+                formData.append('race_name', raceName);
+            }
+            
+            const response = await fetch('/upload_gpx', {
+                method: 'POST',
+                body: formData
+            });
+            
+            const data = await response.json();
+            
+            // 更新加载状态文本
+            document.getElementById('loading-text').textContent = '正在获取该地区历史天气信息...';
+            
+            await processGpxData(data);
+            
+        } catch (error) {
+            console.error('Error:', error);
+            alert('上传文件时发生错误');
+        } finally {
+            elements.loadingDiv.style.display = 'none';
+            elements.submitBtn.disabled = false;
+            elements.uploadLabel.classList.remove('disabled');
+        }
+    }
+    
+    // 延迟初始化地图，直到需要时才创建
+    function initializeMap() {
+        if (map) return map;
+        
+        map = L.map(elements.mapContainer, {
+            zoomControl: true,
+            attributionControl: true
+        });
+        
+        L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+            attribution: 'Map data: © OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap (CC-BY-SA)',
+            maxZoom: 17
+        }).addTo(map);
+        
+        L.control.zoom({
+            position: 'topright'
+        }).addTo(map);
+        
+        return map;
+    }
+    
+    // 处理GPX数据
+    async function processGpxData(data) {
+        if (!data.points || data.points.length === 0) return;
+        
+        elements.dataContainer.style.display = 'block';
+        elements.mapContainer.style.display = 'block';
+        elements.weatherContainer.style.display = 'block';
+        
+        const map = initializeMap();
+        
+        // 清除现有图层
+        map.eachLayer((layer) => {
+            if (!(layer instanceof L.TileLayer)) {
+                map.removeLayer(layer);
+            }
+        });
+        
+        // 绘制路线
+        allPoints = data.points;
+        const polyline = L.polyline(allPoints, {
+            color: 'red',
+            weight: 2,
+            smoothFactor: 1
+        }).addTo(map);
+        
+        // 添加起点终点标记
+        addMarkers(allPoints[0], allPoints[allPoints.length - 1]);
+        
+        // 调整地图视图
+        map.fitBounds(polyline.getBounds(), {
+            padding: [50, 50],
+            maxZoom: 15
+        });
+        
+        // 更新统计数据
+        updateStats(data.stats);
+        
+        // 更新分段数据
+        calculateSegmentData(data.elevation_data.distances, data.elevation_data.elevations);
+        
+        // 创建高程图表
+        createElevationChart(data.elevation_data);
+        
+        // 获取并显示天气数据
+        const startPoint = data.points[0];
+        await fetchWeatherData(startPoint[0], startPoint[1], elements.raceDate.value);
+    }
+    
+    // 添加起点和终点标记
+    function addMarkers(startPoint, endPoint) {
+        const createMarker = (point, color, text) => {
+            return L.marker(point, {
+                icon: L.divIcon({
+                    className: 'custom-div-icon',
+                    html: `<div style='background-color:${color};' class='marker-pin'></div><i class='fas fa-flag-checkered'></i>`,
+                    iconSize: [30, 42],
+                    iconAnchor: [15, 42]
+                })
+            }).addTo(map).bindPopup(text);
+        };
+        
+        createMarker(startPoint, '#4CAF50', '起点');
+        createMarker(endPoint, '#f44336', '终点');
+    }
+    
+    // 更新统计数据
+    function updateStats(stats) {
+        elements.totalDistance.textContent = stats.distance.toFixed(2);
+        elements.totalElevationGain.textContent = stats.elevation_gain.toFixed(0);
+        elements.totalElevationLoss.textContent = stats.elevation_loss.toFixed(0);
+        
+        const averageGrade = (stats.elevation_gain / (stats.distance * 1000)) * 100;
+        elements.averageGrade.textContent = averageGrade.toFixed(1) + '%';
+    }
+    
+    // 创建高程图表
+    function createElevationChart(elevationData) {
+        if (chart) {
+            chart.destroy();
+        }
+        
+        const ctx = elements.elevationChart.getContext('2d');
+        chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: elevationData.distances,
+                datasets: [{
+                    label: '海拔（米）',
+                    data: elevationData.elevations,
+                    borderColor: '#FC4C02',
+                    backgroundColor: 'rgba(252, 76, 2, 0.1)',
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 0,
+                    pointHoverRadius: 4,
+                    pointHoverBackgroundColor: '#FC4C02'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        callbacks: {
+                            label: function(context) {
+                                if (context.parsed.y !== null) {
+                                    return `海拔（米）: ${context.parsed.y.toFixed(1)}`;
+                                }
+                            },
+                            title: function(context) {
+                                return `${context[0].parsed.x.toFixed(2)} km`;
+                            }
+                        }
+                    }
+                },
+                hover: {
+                    mode: 'index',
+                    intersect: false
+                },
+                scales: {
+                    x: {
+                        type: 'linear',
+                        min: 0,
+                        max: elevationData.distances[elevationData.distances.length - 1],
+                        title: {
+                            display: true,
+                            text: '距离（公里）'
+                        },
+                        ticks: {
+                            maxRotation: 0,
+                            callback: function(value) {
+                                return Number.isInteger(value) ? value : null;
+                            }
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: '海拔（米）'
+                        }
+                    }
+                },
+                onHover: debounce((event, elements) => {
+                    if (!elements || !elements.length) {
+                        if (hoverMarker) {
+                            map.removeLayer(hoverMarker);
+                            hoverMarker = null;
+                        }
+                        return;
+                    }
+                    
+                    const index = elements[0].index;
+                    const point = allPoints[index];
+                    
+                    if (hoverMarker) {
+                        map.removeLayer(hoverMarker);
+                    }
+                    
+                    hoverMarker = L.circleMarker([point[0], point[1]], {
+                        radius: 8,
+                        color: '#FC4C02',
+                        fillColor: '#FC4C02',
+                        fillOpacity: 0.7,
+                        className: 'hover-marker'
+                    }).addTo(map);
+                }, 50)
+            }
+        });
+    }
+    
+    // 防抖函数
+    function debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    }
+    
+    function calculateSegmentData(distances, elevations) {
+        const tableBody = document.getElementById('segment-table-body');
+        tableBody.innerHTML = '';
+        
+        let lastKm = 0;
+        let lastElevation = elevations[0];
+        let segmentGain = 0;
+        let segmentLoss = 0;
+        let segmentStartIndex = 0;
+        let currentSegment = 1;
+        
+        for (let i = 1; i < distances.length; i++) {
+            const currentKm = distances[i];
+            const elevationDiff = elevations[i] - elevations[i-1];
+            
+            if (elevationDiff > 0) {
+                segmentGain += elevationDiff;
+            } else {
+                segmentLoss += Math.abs(elevationDiff);
+            }
+            
+            if (Math.floor(currentKm) > Math.floor(lastKm) || i === distances.length - 1) {
+                const segmentDistance = distances[i] - distances[segmentStartIndex];
+                const grade = (segmentGain / (segmentDistance * 1000)) * 100;
+                
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${currentSegment}</td>
+                    <td>${currentKm.toFixed(2)}</td>
+                    <td>${segmentGain.toFixed(0)}</td>
+                    <td>${grade.toFixed(1)}</td>
+                    <td>${segmentLoss.toFixed(0)}</td>
+                `;
+                tableBody.appendChild(row);
+                
+                segmentStartIndex = i;
+                segmentGain = 0;
+                segmentLoss = 0;
+                currentSegment++;
+            }
+            
+            lastKm = currentKm;
+            lastElevation = elevations[i];
+        }
+    }
+    
+    // 获取天气数据
+    async function fetchWeatherData(lat, lon, date) {
+        try {
+            document.getElementById('loading-weather').style.display = 'block';
+            document.getElementById('weather-container').querySelector('.weather-data').style.display = 'none';
+            
+            const response = await fetch('/get_weather_data', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    latitude: lat,
+                    longitude: lon,
+                    date: date
+                })
+            });
+            
+            const result = await response.json();
+            if (result.status === 'success') {
+                displayWeatherData(result.data);
+            } else {
+                console.error('Error fetching weather data:', result.message);
+            }
+        } catch (error) {
+            console.error('Error:', error);
+        } finally {
+            document.getElementById('loading-weather').style.display = 'none';
+            document.getElementById('weather-container').querySelector('.weather-data').style.display = 'block';
+        }
+    }
+    
+    // 显示天气数据
+    function displayWeatherData(weatherData) {
+        // 更新表格
+        const tableBody = document.getElementById('weather-table-body');
+        tableBody.innerHTML = '';
+        
+        weatherData.forEach(data => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${new Date(data.date).getFullYear()}</td>
+                <td>${data.temperature?.toFixed(1)}°C</td>
+                <td>${data.humidity?.toFixed(0)}%</td>
+                <td>${data.precipitation?.toFixed(1)}mm</td>
+                <td>${data.windspeed?.toFixed(1)}km/h</td>
+            `;
+            tableBody.appendChild(row);
+        });
+        
+        // 创建温度趋势图
+        const ctx = document.getElementById('temperatureChart').getContext('2d');
+        if (window.temperatureChart) {
+            window.temperatureChart.destroy();
+        }
+        
+        window.temperatureChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: weatherData.map(data => new Date(data.date).getFullYear()),
+                datasets: [{
+                    label: '温度 (°C)',
+                    data: weatherData.map(data => data.temperature),
+                    borderColor: '#FC4C02',
+                    backgroundColor: 'rgba(252, 76, 2, 0.1)',
+                    fill: true,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: {
+                        display: false
+                    },
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    y: {
+                        title: {
+                            display: true,
+                            text: '温度 (°C)'
+                        },
+                        beginAtZero: false
+                    }
+                }
+            }
+        });
+    }
+});
+</script>
+{% endblock %} 

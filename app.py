@@ -1,13 +1,18 @@
-from flask import Flask, request, redirect, url_for, render_template, session, send_from_directory
+from flask import Flask, request, redirect, url_for, render_template, session, send_from_directory, jsonify
 import requests
 import os
 import json
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import polyline
+import gpxpy
+import gpxpy.gpx
+from geopy.distance import geodesic
 
 # 加载环境变量
 load_dotenv()
+
+WEATHER_API_KEY = os.getenv('VISUAL_CROSSING_API_KEY')
 
 def decode_polyline(encoded_polyline):
     """解码Strava的polyline编码"""
@@ -638,6 +643,149 @@ def get_min_max_values(data):
 def favicon():
     return send_from_directory(os.path.join(app.root_path, 'static'),
                                'favicon.ico', mimetype='image/vnd.microsoft.icon')
+
+@app.route('/gpx_viewer')
+def gpx_viewer():
+    return render_template('gpx_viewer.html')
+
+@app.route('/upload_gpx', methods=['POST'])
+def upload_gpx():
+    if 'gpx_file' not in request.files:
+        return jsonify({'error': '没有上传文件'}), 400
+    
+    file = request.files['gpx_file']
+    if file.filename == '':
+        return jsonify({'error': '没有选择文件'}), 400
+    
+    if not file.filename.endswith('.gpx'):
+        return jsonify({'error': '请上传GPX文件'}), 400
+    
+    try:
+        # 读取GPX文件
+        gpx = gpxpy.parse(file)
+        
+        # 提取轨迹点
+        points = []
+        distances = []
+        elevations = []
+        total_distance = 0
+        elevation_gain = 0
+        elevation_loss = 0
+        last_elevation = None
+        
+        for track in gpx.tracks:
+            for segment in track.segments:
+                last_point = None
+                for point in segment.points:
+                    points.append([point.latitude, point.longitude])
+                    elevations.append(point.elevation)
+                    
+                    if last_point:
+                        # 计算距离
+                        distance = geodesic(
+                            (last_point.latitude, last_point.longitude),
+                            (point.latitude, point.longitude)
+                        ).kilometers
+                        total_distance += distance
+                        distances.append(round(total_distance, 2))
+                        
+                        # 计算爬升和下降
+                        if last_elevation is not None:
+                            elevation_diff = point.elevation - last_elevation
+                            if elevation_diff > 0:
+                                elevation_gain += elevation_diff
+                            else:
+                                elevation_loss += abs(elevation_diff)
+                    else:
+                        distances.append(0)
+                    
+                    last_point = point
+                    last_elevation = point.elevation
+        
+        return jsonify({
+            'points': points,
+            'stats': {
+                'distance': total_distance,
+                'elevation_gain': elevation_gain,
+                'elevation_loss': elevation_loss
+            },
+            'elevation_data': {
+                'distances': distances,
+                'elevations': elevations
+            }
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+def get_historical_weather(lat, lon, target_date):
+    """
+    获取指定位置过去10年同一天的历史天气数据
+    """
+    base_url = "https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline"
+    
+    # 构建过去10年的日期列表
+    current_year = datetime.now().year
+    dates = []
+    weather_data = []
+    
+    for year in range(current_year - 10, current_year):
+        historical_date = target_date.replace(year=year)
+        if historical_date < datetime.now():  # 只获取过去的日期
+            dates.append(historical_date.strftime("%Y-%m-%d"))
+    
+    # 获取每一年的天气数据
+    for date in dates:
+        params = {
+            'key': WEATHER_API_KEY,
+            'unitGroup': 'metric',
+            'include': 'current',
+            'elements': 'datetime,temp,humidity,precip,windspeed,conditions',
+            'contentType': 'json',
+        }
+        
+        url = f"{base_url}/{lat},{lon}/{date}"
+        
+        try:
+            response = requests.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
+            
+            if 'days' in data and len(data['days']) > 0:
+                day_data = data['days'][0]
+                weather_data.append({
+                    'date': date,
+                    'temperature': day_data.get('temp'),
+                    'humidity': day_data.get('humidity'),
+                    'precipitation': day_data.get('precip'),
+                    'windspeed': day_data.get('windspeed'),
+                    'conditions': day_data.get('conditions')
+                })
+        except Exception as e:
+            print(f"Error fetching weather data for {date}: {str(e)}")
+            continue
+    
+    return weather_data
+
+@app.route('/get_weather_data', methods=['POST'])
+def get_weather_data():
+    try:
+        data = request.get_json()
+        lat = data.get('latitude')
+        lon = data.get('longitude')
+        target_date = datetime.strptime(data.get('date'), '%Y-%m-%d')
+        
+        historical_weather = get_historical_weather(lat, lon, target_date)
+        
+        return jsonify({
+            'status': 'success',
+            'data': historical_weather
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
 if __name__ == '__main__':
     # 确保templates目录存在

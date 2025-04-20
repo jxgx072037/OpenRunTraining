@@ -1,0 +1,500 @@
+{% extends "base.html" %}
+
+{% block title %}GPX轨迹查看器{% endblock %}
+
+{% block extra_css %}
+<style>
+    .upload-container {
+        text-align: center;
+        padding: 20px;
+        margin-bottom: 20px;
+        background-color: #f8f9fa;
+        border-radius: 8px;
+    }
+    
+    .upload-form {
+        display: inline-block;
+    }
+    
+    .custom-file-upload {
+        display: inline-block;
+        padding: 10px 20px;
+        background-color: #FC4C02;
+        color: white;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: background-color 0.3s;
+    }
+    
+    .custom-file-upload:hover {
+        background-color: #E34402;
+    }
+    
+    .custom-file-upload.disabled {
+        background-color: #ccc;
+        cursor: not-allowed;
+    }
+    
+    #file-input {
+        display: none;
+    }
+    
+    .map-container {
+        height: 600px;
+        margin-bottom: 20px;
+        border-radius: 8px;
+        overflow: hidden;
+        display: none;
+        position: relative;
+    }
+    
+    .elevation-chart {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 200px;
+        background: rgba(255, 255, 255, 0.7);
+        z-index: 1000;
+        padding: 10px;
+    }
+    
+    .stats-container {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 20px;
+        margin-bottom: 30px;
+    }
+    
+    .stat-card {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        text-align: center;
+    }
+    
+    .stat-value {
+        font-size: 24px;
+        font-weight: bold;
+        color: #FC4C02;
+        margin: 10px 0;
+    }
+    
+    .stat-label {
+        color: #666;
+        font-size: 14px;
+    }
+    
+    .loading {
+        display: none;
+        text-align: center;
+        padding: 20px;
+        font-size: 18px;
+        color: #666;
+    }
+    
+    .loading i {
+        margin-right: 10px;
+        color: #FC4C02;
+    }
+    
+    .hover-marker {
+        transition: opacity 0.3s ease;
+    }
+    
+    .formula-note {
+        color: #666;
+        font-size: 12px;
+        margin-top: 8px;
+        font-style: italic;
+        line-height: 1.3;
+    }
+    
+    .segment-table-container {
+        margin-top: 30px;
+        margin-bottom: 30px;
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    }
+    
+    .segment-table-container h3 {
+        margin-bottom: 20px;
+        color: #333;
+    }
+    
+    .table {
+        width: 100%;
+        margin-bottom: 0;
+    }
+    
+    .table th {
+        background-color: #f8f9fa;
+        border-top: none;
+        color: #666;
+        font-weight: 600;
+    }
+    
+    .table td, .table th {
+        padding: 12px;
+        text-align: center;
+        vertical-align: middle;
+    }
+    
+    .table tbody tr:hover {
+        background-color: #f8f9fa;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h2 class="mb-4">GPX轨迹查看器</h2>
+    
+    <div class="upload-container">
+        <form id="upload-form" class="upload-form" enctype="multipart/form-data">
+            <label for="file-input" class="custom-file-upload" id="upload-label">
+                <i class="fas fa-upload"></i> 选择GPX文件
+            </label>
+            <input type="file" id="file-input" name="gpx_file" accept=".gpx">
+        </form>
+    </div>
+    
+    <div class="loading" id="loading">
+        <i class="fas fa-spinner fa-spin"></i> 正在解析GPX文件...
+    </div>
+    
+    <div id="map" class="map-container">
+        <div class="elevation-chart">
+            <canvas id="elevationChart"></canvas>
+        </div>
+    </div>
+    
+    <div class="stats-container">
+        <div class="stat-card">
+            <div class="stat-value" id="total-distance">-</div>
+            <div class="stat-label">总距离（公里）</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="total-elevation-gain">-</div>
+            <div class="stat-label">总爬升（米）</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="average-grade">-</div>
+            <div class="stat-label">平均爬升坡度</div>
+            <div class="formula-note">坡度（%）=（垂直爬升高度 / 水平距离）× 100%</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="total-elevation-loss">-</div>
+            <div class="stat-label">总下降（米）</div>
+        </div>
+    </div>
+    
+    <div class="segment-table-container">
+        <h3>分段数据</h3>
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>段号</th>
+                        <th>累计距离(km)</th>
+                        <th>爬升(m)</th>
+                        <th>平均爬升坡度(%)</th>
+                        <th>下降(m)</th>
+                    </tr>
+                </thead>
+                <tbody id="segment-table-body">
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var map = null;  // 初始时不创建地图
+    var elevationChart = null;
+    var uploadLabel = document.getElementById('upload-label');
+    var loadingDiv = document.getElementById('loading');
+    var mapContainer = document.getElementById('map');
+    var hoverMarker = null;
+    var allPoints = [];
+    
+    // 初始化地图的函数
+    function initializeMap() {
+        if (!map) {
+            map = L.map('map', {
+                zoomControl: true,
+                attributionControl: true
+            });
+            
+            // 使用 OpenTopoMap 地形图层
+            L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+                attribution: 'Map data: © OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap (CC-BY-SA)',
+                maxZoom: 17
+            }).addTo(map);
+            
+            // 添加缩放控件到右上角
+            L.control.zoom({
+                position: 'topright'
+            }).addTo(map);
+        }
+    }
+    
+    // 处理文件上传
+    document.getElementById('file-input').addEventListener('change', function(e) {
+        var file = e.target.files[0];
+        if (file) {
+            loadingDiv.style.display = 'block';
+            uploadLabel.classList.add('disabled');
+            mapContainer.style.display = 'none';
+            
+            var formData = new FormData();
+            formData.append('gpx_file', file);
+            
+            fetch('/upload_gpx', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                loadingDiv.style.display = 'none';
+                uploadLabel.classList.remove('disabled');
+                mapContainer.style.display = 'block';
+                
+                // 确保地图已初始化
+                initializeMap();
+                
+                // 清除现有的图层
+                map.eachLayer((layer) => {
+                    if (!(layer instanceof L.TileLayer)) {
+                        map.removeLayer(layer);
+                    }
+                });
+                
+                var points = data.points;
+                allPoints = points;
+                
+                if (points && points.length > 0) {
+                    var polyline = L.polyline(points, {
+                        color: 'red',
+                        weight: 2,
+                        smoothFactor: 1
+                    }).addTo(map);
+                    
+                    var startPoint = points[0];
+                    var endPoint = points[points.length - 1];
+                    
+                    // 添加起点标记
+                    L.marker(startPoint, {
+                        icon: L.divIcon({
+                            className: 'custom-div-icon',
+                            html: "<div style='background-color:#4CAF50;' class='marker-pin'></div><i class='fas fa-flag-checkered'></i>",
+                            iconSize: [30, 42],
+                            iconAnchor: [15, 42]
+                        })
+                    }).addTo(map).bindPopup('起点');
+                    
+                    // 添加终点标记
+                    L.marker(endPoint, {
+                        icon: L.divIcon({
+                            className: 'custom-div-icon',
+                            html: "<div style='background-color:#f44336;' class='marker-pin'></div><i class='fas fa-flag-checkered'></i>",
+                            iconSize: [30, 42],
+                            iconAnchor: [15, 42]
+                        })
+                    }).addTo(map).bindPopup('终点');
+                    
+                    // 调整地图视野并添加一些padding
+                    map.fitBounds(polyline.getBounds(), {
+                        padding: [50, 50],
+                        maxZoom: 15  // 限制最大缩放级别
+                    });
+                    
+                    document.getElementById('total-distance').textContent = data.stats.distance.toFixed(2);
+                    document.getElementById('total-elevation-gain').textContent = data.stats.elevation_gain.toFixed(0);
+                    document.getElementById('total-elevation-loss').textContent = data.stats.elevation_loss.toFixed(0);
+                    
+                    // 计算并显示平均爬升坡度
+                    const averageGrade = (data.stats.elevation_gain / (data.stats.distance * 1000)) * 100;
+                    document.getElementById('average-grade').textContent = averageGrade.toFixed(1) + '%';
+                    
+                    // 计算并显示分段数据
+                    calculateSegmentData(data.elevation_data.distances, data.elevation_data.elevations);
+                    
+                    if (elevationChart) {
+                        elevationChart.destroy();
+                    }
+                    
+                    // 保持原始数据的完整性，只在显示时处理
+                    var distances = data.elevation_data.distances;
+                    var elevations = data.elevation_data.elevations;
+                    
+                    var ctx = document.getElementById('elevationChart').getContext('2d');
+                    elevationChart = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: distances,
+                            datasets: [{
+                                label: '海拔（米）',
+                                data: elevations,
+                                borderColor: '#FC4C02',
+                                backgroundColor: 'rgba(252, 76, 2, 0.1)',
+                                fill: true,
+                                tension: 0.4,
+                                pointRadius: 0,  // 不显示数据点
+                                pointHoverRadius: 4,  // 悬浮时显示点
+                                pointHoverBackgroundColor: '#FC4C02'
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                title: {
+                                    display: false
+                                },
+                                tooltip: {
+                                    mode: 'index',
+                                    intersect: false,
+                                    callbacks: {
+                                        label: function(context) {
+                                            if (context.parsed.y !== null) {
+                                                return `海拔（米）: ${context.parsed.y.toFixed(1)}`;
+                                            }
+                                        },
+                                        title: function(context) {
+                                            return `${context[0].parsed.x.toFixed(2)} km`;
+                                        }
+                                    }
+                                }
+                            },
+                            hover: {
+                                mode: 'index',
+                                intersect: false
+                            },
+                            scales: {
+                                x: {
+                                    type: 'linear',
+                                    min: 0,
+                                    max: function(context) {
+                                        // 使用最后一个距离点的实际值作为最大值
+                                        return distances[distances.length - 1];
+                                    },
+                                    title: {
+                                        display: true,
+                                        text: '距离（公里）'
+                                    },
+                                    ticks: {
+                                        maxRotation: 0,
+                                        stepSize: 1,
+                                        maxTicksLimit: 20,
+                                        callback: function(value) {
+                                            if (Number.isInteger(value)) {
+                                                return value;
+                                            }
+                                            return null;
+                                        }
+                                    },
+                                    grid: {
+                                        display: true
+                                    }
+                                },
+                                y: {
+                                    title: {
+                                        display: true,
+                                        text: '海拔（米）'
+                                    }
+                                }
+                            },
+                            onHover: (event, elements) => {
+                                if (elements && elements.length > 0) {
+                                    const index = elements[0].index;
+                                    const point = allPoints[index];
+                                    
+                                    // 移除旧的标记
+                                    if (hoverMarker) {
+                                        map.removeLayer(hoverMarker);
+                                    }
+                                    
+                                    // 添加新的标记
+                                    hoverMarker = L.circleMarker([point[0], point[1]], {
+                                        radius: 8,
+                                        color: '#FC4C02',
+                                        fillColor: '#FC4C02',
+                                        fillOpacity: 0.7,
+                                        className: 'hover-marker'
+                                    }).addTo(map);
+                                } else if (hoverMarker) {
+                                    map.removeLayer(hoverMarker);
+                                    hoverMarker = null;
+                                }
+                            }
+                        }
+                    });
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('上传文件时发生错误');
+                loadingDiv.style.display = 'none';
+                uploadLabel.classList.remove('disabled');
+            });
+        }
+    });
+});
+
+// 添加分段数据计算函数
+function calculateSegmentData(distances, elevations) {
+    const tableBody = document.getElementById('segment-table-body');
+    tableBody.innerHTML = ''; // 清空现有数据
+    
+    let lastKm = 0;
+    let lastElevation = elevations[0];
+    let segmentGain = 0;
+    let segmentLoss = 0;
+    let segmentStartIndex = 0;
+    let currentSegment = 1;
+    
+    for (let i = 1; i < distances.length; i++) {
+        const currentKm = distances[i];
+        const elevationDiff = elevations[i] - elevations[i-1];
+        
+        if (elevationDiff > 0) {
+            segmentGain += elevationDiff;
+        } else {
+            segmentLoss += Math.abs(elevationDiff);
+        }
+        
+        // 当达到整公里或到达终点时，创建新的分段
+        if (Math.floor(currentKm) > Math.floor(lastKm) || i === distances.length - 1) {
+            const segmentDistance = distances[i] - distances[segmentStartIndex];
+            const grade = (segmentGain / (segmentDistance * 1000)) * 100;
+            
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${currentSegment}</td>
+                <td>${currentKm.toFixed(2)}</td>
+                <td>${segmentGain.toFixed(0)}</td>
+                <td>${grade.toFixed(1)}</td>
+                <td>${segmentLoss.toFixed(0)}</td>
+            `;
+            tableBody.appendChild(row);
+            
+            // 重置分段数据
+            segmentStartIndex = i;
+            segmentGain = 0;
+            segmentLoss = 0;
+            currentSegment++;
+        }
+        
+        lastKm = currentKm;
+        lastElevation = elevations[i];
+    }
+}
+</script>
+{% endblock %} 
