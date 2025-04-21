@@ -1,4 +1,4 @@
-from flask import Flask, request, redirect, url_for, render_template, session, send_from_directory, jsonify
+from flask import Flask, request, redirect, url_for, render_template, session, send_from_directory, jsonify, Response
 import requests
 import os
 import json
@@ -8,11 +8,17 @@ import polyline
 import gpxpy
 import gpxpy.gpx
 from geopy.distance import geodesic
+import asyncio
+from ai_services import ai_service
+import uuid
 
 # 加载环境变量
 load_dotenv()
 
 WEATHER_API_KEY = os.getenv('VISUAL_CROSSING_API_KEY')
+
+# 用于临时存储GPX和天气数据的字典
+temp_data_store = {}
 
 def decode_polyline(encoded_polyline):
     """解码Strava的polyline编码"""
@@ -49,7 +55,7 @@ app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24))  # 用于session�
 # Strava API配置
 CLIENT_ID = int(os.environ.get('STRAVA_CLIENT_ID', 156185))
 CLIENT_SECRET = os.environ.get('STRAVA_CLIENT_SECRET', '28ffaf520015a739e50db00b4607fd5fa5c970c3')
-REDIRECT_URI = os.environ.get('STRAVA_REDIRECT_URI', 'http://43.139.72.39/callback')
+REDIRECT_URI = os.environ.get('STRAVA_REDIRECT_URI', 'https://43.139.72.39/callback')
 
 # Strava API端点
 AUTH_URL = "https://www.strava.com/oauth/authorize"
@@ -78,7 +84,8 @@ def authorize():
         'approval_prompt': 'auto'
     }
     
-    auth_url = f"{AUTH_URL}?client_id={params['client_id']}&redirect_uri={params['redirect_uri']}&response_type={params['response_type']}&scope={params['scope']}&approval_prompt={params['approval_prompt']}"
+    # 确保使用 HTTPS 协议
+    auth_url = f"{AUTH_URL}?client_id={params['client_id']}&redirect_uri={params['redirect_uri'].replace('http://', 'https://')}&response_type={params['response_type']}&scope={params['scope']}&approval_prompt={params['approval_prompt']}"
     return redirect(auth_url)
 
 @app.route('/callback')
@@ -702,7 +709,7 @@ def upload_gpx():
                     last_point = point
                     last_elevation = point.elevation
         
-        return jsonify({
+        result = {
             'points': points,
             'stats': {
                 'distance': total_distance,
@@ -713,7 +720,20 @@ def upload_gpx():
                 'distances': distances,
                 'elevations': elevations
             }
-        })
+        }
+        
+        # 生成唯一ID并存储数据
+        data_id = str(uuid.uuid4())
+        temp_data_store[data_id] = {
+            'gpx_data': result,
+            'weather_data': [],
+            'timestamp': datetime.now().timestamp()
+        }
+        
+        # 仅在session中存储数据ID，而不是整个数据
+        session['data_id'] = data_id
+        
+        return jsonify(result)
     
     except Exception as e:
         return jsonify({'error': str(e)}), 400
@@ -777,6 +797,12 @@ def get_weather_data():
         
         historical_weather = get_historical_weather(lat, lon, target_date)
         
+        # 检查session中是否有数据ID
+        data_id = session.get('data_id')
+        if data_id and data_id in temp_data_store:
+            # 更新存储的天气数据
+            temp_data_store[data_id]['weather_data'] = historical_weather
+        
         return jsonify({
             'status': 'success',
             'data': historical_weather
@@ -787,8 +813,91 @@ def get_weather_data():
             'message': str(e)
         }), 500
 
+@app.route('/get_training_advice')
+def get_training_advice():
+    """
+    获取训练建议的流式响应
+    """
+    try:
+        # 从session获取数据ID
+        data_id = session.get('data_id')
+        if not data_id or data_id not in temp_data_store:
+            print(f"未找到数据ID: {data_id}")
+            return jsonify({'error': '未找到GPX数据，请先上传路线'}), 400
+        
+        # 从请求参数中获取比赛日期
+        match_date = request.args.get('match_date')
+        if not match_date:
+            return jsonify({'error': '请提供比赛日期'}), 400
+            
+        # 从存储中获取数据
+        stored_data = temp_data_store[data_id]
+        gpx_data = stored_data.get('gpx_data')
+        weather_data = stored_data.get('weather_data', [])
+        
+        # 确保数据结构完整
+        if not gpx_data or not isinstance(gpx_data, dict) or 'stats' not in gpx_data:
+            print("GPX数据结构不完整:", gpx_data)
+            return jsonify({'error': 'GPX数据不完整，请重新上传'}), 400
+        
+        # 创建一个标准生成器函数，包装异步生成器的结果
+        def generate():
+            # 创建事件循环
+            loop = asyncio.new_event_loop()
+            
+            # 包装异步生成器的协程
+            async def fetch_chunks():
+                try:
+                    async for text_chunk in ai_service.generate_training_advice_stream(gpx_data, weather_data, match_date):
+                        # 确保文本是字符串并转义JSON特殊字符
+                        if isinstance(text_chunk, str):
+                            yield f"data: {json.dumps({'text': text_chunk})}\n\n"
+                except Exception as e:
+                    error_msg = str(e)
+                    print(f"生成训练建议时出错: {error_msg}")
+                    yield f"data: {json.dumps({'error': error_msg})}\n\n"
+            
+            # 创建一个任务用于获取所有chunks
+            async def get_all_chunks():
+                async for chunk in fetch_chunks():
+                    yield chunk
+            
+            # 运行异步生成器并将结果同步返回
+            async_gen = get_all_chunks()
+            
+            try:
+                while True:
+                    try:
+                        # 让事件循环运行下一个异步迭代
+                        chunk = loop.run_until_complete(async_gen.__anext__())
+                        yield chunk
+                    except StopAsyncIteration:
+                        break
+            finally:
+                loop.close()
+        
+        return Response(generate(), mimetype='text/event-stream')
+    except Exception as e:
+        print(f"训练建议路由出错: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# 定期清理临时数据
+def cleanup_temp_data():
+    current_time = datetime.now().timestamp()
+    expired_ids = []
+    
+    for data_id, data in temp_data_store.items():
+        # 数据存储超过30分钟则清理
+        if current_time - data.get('timestamp', 0) > 30 * 60:
+            expired_ids.append(data_id)
+    
+    for data_id in expired_ids:
+        temp_data_store.pop(data_id, None)
+        
+# 添加定时器来定期清理数据（可以使用apscheduler等库实现）
+
 if __name__ == '__main__':
     # 确保templates目录存在
     if not os.path.exists('templates'):
         os.makedirs('templates')
-    app.run(debug=True) 
+    app.run(host='0.0.0.0', port=5000, debug=True) 
