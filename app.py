@@ -66,74 +66,6 @@ ACTIVITY_URL = "https://www.strava.com/api/v3/activities/{id}"
 
 @app.route('/')
 def index():
-    # 检查令牌是否过期
-    if 'access_token' in session and is_token_expired():
-        # 如果过期，尝试刷新令牌
-        refresh_token()
-        
-    return render_template('index.html', session=session)
-
-@app.route('/authorize')
-def authorize():
-    # 构建授权URL
-    params = {
-        'client_id': CLIENT_ID,
-        'redirect_uri': REDIRECT_URI,
-        'response_type': 'code',
-        'scope': 'read,activity:read_all,profile:read_all',
-        'approval_prompt': 'auto'
-    }
-    
-    # 确保使用 HTTPS 协议
-    auth_url = f"{AUTH_URL}?client_id={params['client_id']}&redirect_uri={params['redirect_uri'].replace('http://', 'https://')}&response_type={params['response_type']}&scope={params['scope']}&approval_prompt={params['approval_prompt']}"
-    return redirect(auth_url)
-
-@app.route('/callback')
-def callback():
-    # 处理授权回调
-    if 'error' in request.args:
-        return f"授权失败: {request.args.get('error')}"
-    
-    # 获取授权码
-    code = request.args.get('code')
-    
-    # 用授权码交换令牌
-    token_data = exchange_code_for_token(code)
-    
-    if not token_data:
-        return "获取令牌失败"
-    
-    # 保存令牌信息到session
-    save_token_to_session(token_data)
-    
-    # 获取用户信息
-    athlete_data = get_athlete_data()
-    
-    return render_template('profile.html', athlete=athlete_data)
-
-@app.route('/profile')
-def profile():
-    # 检查令牌是否存在
-    if 'access_token' not in session:
-        return redirect(url_for('authorize'))
-    
-    # 检查令牌是否过期
-    if is_token_expired():
-        # 如果过期，尝试刷新令牌
-        refreshed = refresh_token()
-        if not refreshed:
-            return redirect(url_for('authorize'))
-    
-    # 获取用户信息
-    athlete_data = get_athlete_data()
-    
-    if not athlete_data:
-        return redirect(url_for('authorize'))
-    
-    return render_template('profile.html', athlete=athlete_data)
-
-@app.route('/activities')
-def activities():
     # 检查令牌是否存在
     if 'access_token' not in session:
         return redirect(url_for('authorize'))
@@ -181,214 +113,61 @@ def activities():
                           years=available_years,
                           selected_year=selected_year)
 
-def filter_pace_outliers(pace_data, multiplier=2.5):
-    """使用IQR方法过滤异常的配速数据
-    
-    Args:
-        pace_data: 配速数据列表
-        multiplier: IQR乘数，用于调整过滤的严格程度
-    
-    Returns:
-        过滤后的配速数据列表
-    """
-    # 移除None值和0值
-    valid_data = [x for x in pace_data if x is not None and x > 0]
-    if not valid_data:
-        return pace_data
-    
-    # 计算四分位数
-    valid_data.sort()
-    n = len(valid_data)
-    q1_idx = int(n * 0.25)
-    q3_idx = int(n * 0.75)
-    q1 = valid_data[q1_idx]
-    q3 = valid_data[q3_idx]
-    
-    # 计算四分位距
-    iqr = q3 - q1
-    
-    # 设置上下限
-    lower_bound = max(2.0, q1 - multiplier * iqr)  # 不允许配速低于2分钟/公里
-    upper_bound = min(20.0, q3 + multiplier * iqr)  # 不允许配速高于20分钟/公里
-    
-    # 过滤数据
-    filtered_data = []
-    for pace in pace_data:
-        if pace is None or pace < lower_bound or pace > upper_bound:
-            filtered_data.append(None)
-        else:
-            filtered_data.append(pace)
-    
-    return filtered_data
-
-def moving_average(data, window_size=80):
-    """计算移动平均
-    
-    Args:
-        data: 数据列表
-        window_size: 窗口大小，默认80
-        
-    Returns:
-        移动平均后的数据列表
-    """
-    if not data or len(data) == 0:
-        return []
-        
-    result = []
-    window = min(window_size, len(data))
-    
-    for i in range(len(data)):
-        sum_val = 0
-        count = 0
-        
-        for j in range(max(0, i - window//2), min(len(data), i + window//2 + 1)):
-            if data[j] is not None:
-                sum_val += data[j]
-                count += 1
-        
-        result.append(sum_val / count if count > 0 else None)
-    
-    return result
-
-@app.route('/activity/<activity_id>')
-def activity_detail(activity_id):
+@app.route('/route')
+def route_planner():
+    # 检查令牌是否存在
     if 'access_token' not in session:
-        return redirect(url_for('login'))
+        return redirect(url_for('authorize'))
+    
+    # 检查令牌是否过期
+    if is_token_expired():
+        # 如果过期，尝试刷新令牌
+        refreshed = refresh_token()
+        if not refreshed:
+            return redirect(url_for('authorize'))
+            
+    return render_template('index.html')
 
-    headers = {'Authorization': f"Bearer {session['access_token']}"}
+@app.route('/authorize')
+def authorize():
+    # 构建授权URL
+    params = {
+        'client_id': CLIENT_ID,
+        'redirect_uri': REDIRECT_URI,
+        'response_type': 'code',
+        'scope': 'read,activity:read_all,profile:read_all',
+        'approval_prompt': 'auto'
+    }
     
-    # 获取活动详情
-    response = requests.get(f'https://www.strava.com/api/v3/activities/{activity_id}', headers=headers)
-    if response.status_code != 200:
-        return "无法获取活动详情"
+    # 确保使用 HTTPS 协议
+    auth_url = f"{AUTH_URL}?client_id={params['client_id']}&redirect_uri={params['redirect_uri'].replace('http://', 'https://')}&response_type={params['response_type']}&scope={params['scope']}&approval_prompt={params['approval_prompt']}"
+    return redirect(auth_url)
+
+@app.route('/callback')
+def callback():
+    # 处理授权回调
+    if 'error' in request.args:
+        return f"授权失败: {request.args.get('error')}"
     
-    activity = response.json()
+    # 获取授权码
+    code = request.args.get('code')
     
-    # 获取活动流数据
-    streams_response = requests.get(
-        f'https://www.strava.com/api/v3/activities/{activity_id}/streams',
-        headers=headers,
-        params={
-            'keys': 'time,distance,heartrate,cadence,altitude,velocity_smooth',
-            'key_by_type': True
-        }
-    )
+    # 用授权码交换令牌
+    token_data = exchange_code_for_token(code)
     
-    streams = {}
-    if streams_response.status_code == 200:
-        streams = streams_response.json()
-        
-        # 处理流数据
-        if streams:
-            # 确保所有数据长度一致
-            data_length = len(next(iter(streams.values()))['data'])
-            stream_data = {
-                'distance': [],
-                'pace': [],
-                'heartrate': [],
-                'cadence': [],
-                'altitude': [],
-                'time': []  # 添加时间数据
-            }
-            
-            # 处理距离数据（转换为千米）
-            if 'distance' in streams:
-                stream_data['distance'] = [d/1000 for d in streams['distance']['data']]
-            
-            # 处理时间数据（转换为时:分:秒格式）
-            if 'time' in streams:
-                stream_data['time'] = []
-                for t in streams['time']['data']:
-                    hours = t // 3600
-                    minutes = (t % 3600) // 60
-                    seconds = t % 60
-                    if hours > 0:
-                        stream_data['time'].append(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
-                    else:
-                        stream_data['time'].append(f"{minutes:02d}:{seconds:02d}")
-            
-            # 处理速度数据（转换为配速：分钟/公里）
-            if 'velocity_smooth' in streams:
-                raw_pace = [round(1000/v/60, 2) if v > 0.1 else None for v in streams['velocity_smooth']['data']]
-                stream_data['pace'] = moving_average(raw_pace)
-            
-            # 处理心率数据
-            if 'heartrate' in streams:
-                stream_data['heartrate'] = moving_average(streams['heartrate']['data'])
-            
-            # 处理步频数据（乘以2，因为API返回的是单脚步频）
-            if 'cadence' in streams:
-                raw_cadence = [c * 2 if c is not None else None for c in streams['cadence']['data']]
-                stream_data['cadence'] = moving_average(raw_cadence)
-            
-            # 处理海拔数据
-            if 'altitude' in streams:
-                stream_data['altitude'] = streams['altitude']['data']
-            
-            # 计算各指标的最大最小值
-            stream_data['pace_range'] = get_min_max_values(stream_data['pace'])
-            stream_data['heartrate_range'] = get_min_max_values(stream_data['heartrate'])
-            stream_data['cadence_range'] = get_min_max_values(stream_data['cadence'])
-            stream_data['altitude_range'] = get_min_max_values(stream_data['altitude'])
+    if not token_data:
+        return "获取令牌失败"
     
-    # 获取分段数据
-    segments_response = requests.get(f'https://www.strava.com/api/v3/activities/{activity_id}/laps', headers=headers)
-    segments = []
-    if segments_response.status_code == 200:
-        segments = segments_response.json()
-        for segment in segments:
-            # 计算配速（分钟/公里）或速度（公里/小时）
-            if segment.get('average_speed'):
-                if activity.get('type') == 'Run':
-                    segment['pace'] = round(1000 / segment['average_speed'] / 60, 2)
-                else:
-                    segment['speed'] = round(segment['average_speed'] * 3.6, 1)
-            
-            # 转换距离为千米
-            if 'distance' in segment:
-                segment['distance_km'] = round(segment['distance'] / 1000, 2)
-            
-            # 计算时间
-            if 'moving_time' in segment:
-                minutes, seconds = divmod(segment['moving_time'], 60)
-                hours, minutes = divmod(minutes, 60)
-                if hours > 0:
-                    segment['formatted_time'] = f"{hours}时{minutes}分{seconds}秒"
-                else:
-                    segment['formatted_time'] = f"{minutes}分{seconds}秒"
-            
-            # 处理海拔变化
-            if 'total_elevation_gain' in segment:
-                segment['elevation_gain'] = round(segment['total_elevation_gain'], 1)
+    # 保存令牌信息到session
+    save_token_to_session(token_data)
     
-    # 解码路线数据
-    points = decode_polyline(activity.get('map', {}).get('summary_polyline', ''))
-    bounds = get_bounds(points) if points else None
-    
-    # 获取起点坐标
-    start_latlng = activity.get('start_latlng', [])
-    if start_latlng:
-        start_lat = start_latlng[0]
-        start_lng = start_latlng[1]
-    else:
-        start_lat = None
-        start_lng = None
-    
-    return render_template('activity_detail.html', 
-                         activity=activity,
-                         points=points,
-                         bounds=bounds,
-                         start_lat=start_lat,
-                         start_lng=start_lng,
-                         segments=segments,
-                         streams=stream_data if streams else None)
+    # 重定向到首页
+    return redirect(url_for('index'))
 
 @app.route('/logout')
 def logout():
-    # 清除session中的令牌信息
-    session.pop('access_token', None)
-    session.pop('refresh_token', None)
-    session.pop('expires_at', None)
+    # 清除session中的所有数据
+    session.clear()
     return redirect(url_for('index'))
 
 def exchange_code_for_token(code):
@@ -633,18 +412,18 @@ def get_activity_detail(activity_id):
         return None
 
 def get_min_max_values(data):
-    """获取数据的最大最小值，忽略None值
+    """获取数据的最小值和最大值
     
     Args:
         data: 数据列表
         
     Returns:
-        (min_value, max_value) 元组
+        [最小值, 最大值]的列表
     """
     valid_data = [x for x in data if x is not None]
     if not valid_data:
-        return None, None
-    return min(valid_data), max(valid_data)
+        return [0, 0]
+    return [min(valid_data), max(valid_data)]
 
 @app.route('/favicon.ico')
 def favicon():
@@ -829,7 +608,7 @@ def get_training_advice():
         match_date = request.args.get('match_date')
         if not match_date:
             return jsonify({'error': '请提供比赛日期'}), 400
-            
+        
         # 从存储中获取数据
         stored_data = temp_data_store[data_id]
         gpx_data = stored_data.get('gpx_data')
@@ -895,6 +674,132 @@ def cleanup_temp_data():
         temp_data_store.pop(data_id, None)
         
 # 添加定时器来定期清理数据（可以使用apscheduler等库实现）
+
+@app.route('/activity/<int:activity_id>')
+def activity_detail(activity_id):
+    """活动详情页面
+    
+    Args:
+        activity_id: 活动ID
+    """
+    # 获取活动详情
+    activity = get_activity_detail(activity_id)
+    if not activity:
+        return "获取活动详情失败", 500
+    
+    # 获取活动的GPS点数据
+    points = []
+    start_lat = None
+    start_lng = None
+    
+    if activity.get('map') and activity['map'].get('polyline'):
+        points = decode_polyline(activity['map']['polyline'])
+        if points:
+            start_lat = points[0][0]
+            start_lng = points[0][1]
+    
+    # 获取活动的流数据（心率、配速等）
+    streams = get_activity_streams(activity_id)
+    
+    # 获取分段数据
+    segments = get_activity_segments(activity)
+    
+    return render_template('activity_detail.html',
+                         activity=activity,
+                         points=points,
+                         start_lat=start_lat,
+                         start_lng=start_lng,
+                         streams=streams,
+                         segments=segments)
+
+def get_activity_streams(activity_id):
+    """获取活动的流数据
+    
+    Args:
+        activity_id: 活动ID
+    """
+    if 'access_token' not in session:
+        return None
+    
+    headers = {'Authorization': f'Bearer {session["access_token"]}'}
+    url = f"https://www.strava.com/api/v3/activities/{activity_id}/streams"
+    params = {
+        'keys': 'time,distance,heartrate,cadence,watts,altitude,velocity_smooth,grade_smooth',
+        'key_by_type': True
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            streams = {
+                'time': data.get('time', {}).get('data', []),
+                'distance': data.get('distance', {}).get('data', []),
+                'heartrate': data.get('heartrate', {}).get('data', []),
+                'cadence': data.get('cadence', {}).get('data', []),
+                'watts': data.get('watts', {}).get('data', []),
+                'altitude': data.get('altitude', {}).get('data', []),
+                'velocity': data.get('velocity_smooth', {}).get('data', []),
+                'grade': data.get('grade_smooth', {}).get('data', [])
+            }
+            
+            # 计算配速数据（分钟/公里）
+            if streams['velocity']:
+                streams['pace'] = [1000 / v / 60 if v > 0 else 0 for v in streams['velocity']]
+            else:
+                streams['pace'] = []
+            
+            return streams
+        return None
+    except Exception as e:
+        print(f"获取活动流数据时出错: {e}")
+        return None
+
+def get_activity_segments(activity):
+    """处理活动分段数据
+    
+    Args:
+        activity: 活动详情数据
+    """
+    if not activity.get('splits_metric'):
+        return None
+    
+    segments = []
+    for split in activity['splits_metric']:
+        segment = {
+            'distance_km': round(split['distance'] / 1000, 2),
+            'elevation_gain': round(split['elevation_difference']),
+            'formatted_time': format_duration(split['moving_time'])
+        }
+        
+        # 计算配速或速度
+        if activity['type'] == 'Run':
+            # 跑步显示配速（分钟/公里）
+            pace = split['moving_time'] / 60 / (split['distance'] / 1000)
+            pace_minutes = int(pace)
+            pace_seconds = int((pace - pace_minutes) * 60)
+            segment['pace'] = f"{pace_minutes}:{pace_seconds:02d}"
+        else:
+            # 其他运动显示速度（公里/小时）
+            segment['speed'] = round((split['distance'] / split['moving_time']) * 3.6, 1)
+        
+        segments.append(segment)
+    
+    return segments
+
+def format_duration(seconds):
+    """格式化时间
+    
+    Args:
+        seconds: 秒数
+    """
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    seconds = seconds % 60
+    
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes}:{seconds:02d}"
 
 if __name__ == '__main__':
     # 确保templates目录存在

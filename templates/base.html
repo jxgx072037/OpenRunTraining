@@ -1,15 +1,15 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
     <link rel="shortcut icon" href="{{ url_for('static', filename='favicon.ico') }}">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='images/icon.png') }}">
-    <title>{% block title %}{% endblock %} - OpenRunTraining</title>
+    <title>{% block title %}OpenRunTraining{% endblock %}</title>
     
     <!-- Bootstrap CSS -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css">
@@ -19,30 +19,55 @@
     
     <!-- Custom CSS -->
     <style>
+        /* 全局样式 */
+        body {
+            font-family: 'Arial', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f7f7f7;
+            color: #333;
+        }
+        
+        /* 导航栏样式 */
         .navbar {
             background-color: #FC4C02;
             padding: 1rem;
         }
+        
         .navbar-brand {
             color: white !important;
             font-weight: bold;
-            font-size: 1.5rem;
         }
+        
         .nav-link {
             color: rgba(255,255,255,0.9) !important;
-            margin: 0 10px;
         }
+        
         .nav-link:hover {
             color: white !important;
         }
+        
         .nav-link.active {
-            font-weight: bold;
             color: white !important;
+            font-weight: bold;
         }
+        
         .main-container {
-            padding-top: 2rem;
-            padding-bottom: 2rem;
+            padding: 2rem 0;
         }
+        
+        /* 其他全局样式 */
+        .btn-strava {
+            background-color: #FC4C02;
+            color: white;
+            border: none;
+        }
+        
+        .btn-strava:hover {
+            background-color: #E34402;
+            color: white;
+        }
+        
         .activity-map {
             height: 400px;
             width: 100%;
@@ -59,7 +84,7 @@
     {% block extra_css %}{% endblock %}
 </head>
 <body>
-    <!-- Navigation Bar -->
+    <!-- 导航栏 -->
     <nav class="navbar navbar-expand-lg">
         <div class="container">
             <a class="navbar-brand" href="/">OpenRunTraining</a>
@@ -69,17 +94,24 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav">
                     <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'index' %}active{% endif %}" href="/">比赛路线</a>
+                        <a class="nav-link {% if request.endpoint == 'index' %}active{% endif %}" href="/">首页</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'activities' %}active{% endif %}" href="/activities">活动列表</a>
+                        <a class="nav-link {% if request.endpoint == 'route_planner' %}active{% endif %}" href="/route">训练计划</a>
                     </li>
                 </ul>
+                {% if 'access_token' in session %}
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/logout">退出登录</a>
+                    </li>
+                </ul>
+                {% endif %}
             </div>
         </div>
     </nav>
 
-    <!-- Main Content -->
+    <!-- 主要内容 -->
     <div class="container main-container">
         {% block content %}{% endblock %}
     </div>
