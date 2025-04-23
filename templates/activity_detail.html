@@ -218,12 +218,70 @@ document.addEventListener('DOMContentLoaded', function() {
     var streams = {{ streams|tojson }};
     var activity = {{ activity|tojson }};
     var myChart = null;
+    var currentMarker = null;  // 用于存储当前的标记
+    
+    // 检查streams数据是否有效
+    if (!streams || !streams.distance || streams.distance.length === 0) {
+        console.error('无效的streams数据');
+        return;
+    }
+
+    // 数据降采样函数
+    function downsampleData(data, maxPoints = 500) {
+        if (!data || data.length === 0) return [];
+        if (data.length <= maxPoints) return data;
+        
+        const step = Math.ceil(data.length / maxPoints);
+        const result = [];
+        
+        for (let i = 0; i < data.length; i += step) {
+            // 计算当前窗口的平均值
+            const window = data.slice(i, Math.min(i + step, data.length));
+            const avg = window.reduce((sum, val) => sum + (val || 0), 0) / window.length;
+            result.push(avg);
+        }
+        
+        return result;
+    }
+
+    // 计算累计距离（千米）
+    function calculateCumulativeDistance(distances) {
+        if (!distances || distances.length === 0) return [];
+        const cumulativeDistances = [];
+        let sum = 0;
+        
+        for (let i = 0; i < distances.length; i++) {
+            if (i === 0) {
+                sum = distances[i] / 1000; // 第一个点的距离（转换为千米）
+            } else {
+                // 计算当前点与前一个点的距离差，并累加
+                const diff = (distances[i] - distances[i-1]) / 1000;
+                sum += diff;
+            }
+            cumulativeDistances.push(sum);
+        }
+        
+        return cumulativeDistances;
+    }
+
+    // 对数据进行降采样
+    const maxPoints = 500;
+    const cumulativeDistances = calculateCumulativeDistance(streams.distance);
+    
+    const downsampledStreams = {
+        distance: downsampleData(cumulativeDistances, maxPoints),
+        pace: downsampleData(streams.pace || [], maxPoints),
+        heartrate: downsampleData(streams.heartrate || [], maxPoints),
+        cadence: downsampleData(streams.cadence || [], maxPoints),
+        altitude: downsampleData(streams.altitude || [], maxPoints),
+        time: streams.time ? downsampleData(streams.time, maxPoints) : null
+    };
     
     // 定义数据集配置
     const datasetConfigs = {
         pace: {
             label: '配速 (分钟/公里)',
-            data: streams.pace,
+            data: downsampledStreams.pace,
             yAxisID: 'y-pace',
             borderColor: '#2196F3',
             backgroundColor: 'rgba(33, 150, 243, 0.1)',
@@ -231,7 +289,7 @@ document.addEventListener('DOMContentLoaded', function() {
         },
         heartrate: {
             label: '心率 (bpm)',
-            data: streams.heartrate,
+            data: downsampledStreams.heartrate,
             yAxisID: 'y-heartrate',
             borderColor: '#F44336',
             backgroundColor: 'rgba(244, 67, 54, 0.1)',
@@ -239,7 +297,7 @@ document.addEventListener('DOMContentLoaded', function() {
         },
         cadence: {
             label: '步频 (spm)',
-            data: streams.cadence,
+            data: downsampledStreams.cadence,
             yAxisID: 'y-cadence',
             borderColor: '#FF9800',
             backgroundColor: 'rgba(255, 152, 0, 0.1)',
@@ -247,7 +305,7 @@ document.addEventListener('DOMContentLoaded', function() {
         },
         altitude: {
             label: '海拔 (m)',
-            data: streams.altitude,
+            data: downsampledStreams.altitude,
             yAxisID: 'y-altitude',
             borderColor: '#757575',
             backgroundColor: 'rgba(158, 158, 158, 0.2)',
@@ -258,19 +316,27 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 创建图表
     function createChart() {
-        const datasets = Object.entries(datasetConfigs).map(([key, config]) => ({
-            ...config,
-            borderWidth: 1.5,
-            pointRadius: 0,
-            cubicInterpolationMode: 'monotone',
-            tension: 0.7,
-            spanGaps: true
-        }));
+        const datasets = Object.entries(datasetConfigs)
+            .filter(([key, config]) => config.data && config.data.length > 0)
+            .map(([key, config]) => ({
+                ...config,
+                borderWidth: 2.5,
+                pointRadius: 0,
+                cubicInterpolationMode: 'monotone',
+                tension: 0.8,
+                spanGaps: true,
+                lineTension: 0.5
+            }));
+
+        if (datasets.length === 0) {
+            console.error('没有可用的数据来创建图表');
+            return;
+        }
 
         myChart = new Chart(ctx, {
             type: 'line',
             data: {
-                labels: streams.distance,
+                labels: downsampledStreams.distance,
                 datasets: datasets
             },
             options: {
@@ -280,6 +346,51 @@ document.addEventListener('DOMContentLoaded', function() {
                     mode: 'index',
                     intersect: false
                 },
+                onHover: function(event, elements) {
+                    if (!window.activityMap || !window.activityPoints) return;
+                    
+                    // 移除之前的标记
+                    if (currentMarker) {
+                        window.activityMap.removeLayer(currentMarker);
+                        currentMarker = null;
+                    }
+                    
+                    if (elements && elements.length > 0) {
+                        const index = elements[0].index;
+                        const currentDistance = downsampledStreams.distance[index];
+                        
+                        // 找到最接近当前距离的地图点
+                        let closestPointIndex = 0;
+                        let minDistanceDiff = Infinity;
+                        let totalDistance = 0;
+                        
+                        for (let i = 1; i < window.activityPoints.length; i++) {
+                            const prevPoint = window.activityPoints[i - 1];
+                            const currPoint = window.activityPoints[i];
+                            const segmentDistance = getDistanceFromLatLonInKm(
+                                prevPoint[0], prevPoint[1], 
+                                currPoint[0], currPoint[1]
+                            );
+                            totalDistance += segmentDistance;
+                            
+                            const diff = Math.abs(totalDistance - currentDistance);
+                            if (diff < minDistanceDiff) {
+                                minDistanceDiff = diff;
+                                closestPointIndex = i;
+                            }
+                        }
+                        
+                        const point = window.activityPoints[closestPointIndex];
+                        // 创建新标记
+                        currentMarker = L.circleMarker([point[0], point[1]], {
+                            radius: 8,
+                            color: '#ff0000',
+                            fillColor: '#ff0000',
+                            fillOpacity: 0.7,
+                            weight: 2
+                        }).addTo(window.activityMap);
+                    }
+                },
                 scales: {
                     x: {
                         type: 'linear',
@@ -288,24 +399,16 @@ document.addEventListener('DOMContentLoaded', function() {
                             text: '距离 (km)'
                         },
                         ticks: {
-                            stepSize: 1,
-                            maxTicksLimit: 15,
+                            maxTicksLimit: 10,
                             padding: 10,
                             callback: function(value, index) {
-                                let closestIndex = streams.distance.findIndex(d => Math.abs(d - value) < 0.1);
-                                if (closestIndex !== -1 && streams.time[closestIndex]) {
-                                    return [
-                                        `${value}km`,
-                                        streams.time[closestIndex]
-                                    ];
-                                }
-                                return `${value}km`;
+                                return `${value.toFixed(1)}km`;
                             }
                         }
                     },
                     'y-pace': {
                         type: 'linear',
-                        display: true,
+                        display: datasets.some(d => d.yAxisID === 'y-pace'),
                         position: 'left',
                         reverse: true,
                         title: {
@@ -320,12 +423,12 @@ document.addEventListener('DOMContentLoaded', function() {
                                 return value.toFixed(1);
                             }
                         },
-                        min: Math.max(0, streams.pace_range[0] - (streams.pace_range[1] - streams.pace_range[0]) * 0.05),
-                        max: streams.pace_range[1] + (streams.pace_range[1] - streams.pace_range[0]) * 0.05
+                        min: streams.pace_range ? Math.max(0, streams.pace_range[0] - (streams.pace_range[1] - streams.pace_range[0]) * 0.05) : undefined,
+                        max: streams.pace_range ? streams.pace_range[1] + (streams.pace_range[1] - streams.pace_range[0]) * 0.05 : undefined
                     },
                     'y-heartrate': {
                         type: 'linear',
-                        display: true,
+                        display: datasets.some(d => d.yAxisID === 'y-heartrate'),
                         position: 'right',
                         title: {
                             display: true,
@@ -339,12 +442,12 @@ document.addEventListener('DOMContentLoaded', function() {
                                 return Math.round(value);
                             }
                         },
-                        min: Math.max(0, streams.heartrate_range[0] - (streams.heartrate_range[1] - streams.heartrate_range[0]) * 0.05),
-                        max: streams.heartrate_range[1] + (streams.heartrate_range[1] - streams.heartrate_range[0]) * 0.05
+                        min: streams.heartrate_range ? Math.max(0, streams.heartrate_range[0] - (streams.heartrate_range[1] - streams.heartrate_range[0]) * 0.05) : undefined,
+                        max: streams.heartrate_range ? streams.heartrate_range[1] + (streams.heartrate_range[1] - streams.heartrate_range[0]) * 0.05 : undefined
                     },
                     'y-cadence': {
                         type: 'linear',
-                        display: true,
+                        display: datasets.some(d => d.yAxisID === 'y-cadence'),
                         position: 'right',
                         title: {
                             display: true,
@@ -358,12 +461,12 @@ document.addEventListener('DOMContentLoaded', function() {
                                 return Math.round(value);
                             }
                         },
-                        min: Math.max(0, streams.cadence_range[0] - (streams.cadence_range[1] - streams.cadence_range[0]) * 0.05),
-                        max: streams.cadence_range[1] + (streams.cadence_range[1] - streams.cadence_range[0]) * 0.05
+                        min: streams.cadence_range ? Math.max(0, streams.cadence_range[0] - (streams.cadence_range[1] - streams.cadence_range[0]) * 0.05) : undefined,
+                        max: streams.cadence_range ? streams.cadence_range[1] + (streams.cadence_range[1] - streams.cadence_range[0]) * 0.05 : undefined
                     },
                     'y-altitude': {
                         type: 'linear',
-                        display: true,
+                        display: datasets.some(d => d.yAxisID === 'y-altitude'),
                         position: 'right',
                         title: {
                             display: true,
@@ -377,8 +480,8 @@ document.addEventListener('DOMContentLoaded', function() {
                                 return Math.round(value);
                             }
                         },
-                        min: Math.max(0, streams.altitude_range[0] - (streams.altitude_range[1] - streams.altitude_range[0]) * 0.05),
-                        max: streams.altitude_range[1] + (streams.altitude_range[1] - streams.altitude_range[0]) * 0.05
+                        min: streams.altitude_range ? Math.max(0, streams.altitude_range[0] - (streams.altitude_range[1] - streams.altitude_range[0]) * 0.05) : undefined,
+                        max: streams.altitude_range ? streams.altitude_range[1] + (streams.altitude_range[1] - streams.altitude_range[0]) * 0.05 : undefined
                     }
                 },
                 plugins: {
@@ -386,6 +489,10 @@ document.addEventListener('DOMContentLoaded', function() {
                         mode: 'index',
                         intersect: false,
                         callbacks: {
+                            title: function(context) {
+                                const value = context[0].parsed.x;
+                                return `距离: ${value.toFixed(2)}km`;
+                            },
                             label: function(context) {
                                 let label = context.dataset.label || '';
                                 if (label) {
@@ -406,67 +513,21 @@ document.addEventListener('DOMContentLoaded', function() {
                             }
                         }
                     }
-                },
-                onHover: function(event, elements) {
-                    if (!window.activityMap || !window.activityPoints) return;
-                    
-                    // 移除之前的标记
-                    if (window.currentMarker) {
-                        window.activityMap.removeLayer(window.currentMarker);
-                        window.currentMarker = null;
-                    }
-                    
-                    if (elements && elements.length > 0) {
-                        const index = elements[0].index;
-                        const currentDistance = streams.distance[index];
-                        
-                        // 找到最接近当前距离的地图点
-                        let closestPointIndex = 0;
-                        let minDistanceDiff = Infinity;
-                        
-                        // 计算每个地图点的累计距离
-                        for (let i = 0; i < window.activityPoints.length; i++) {
-                            if (i === 0) continue;
-                            const prevPoint = window.activityPoints[i - 1];
-                            const currPoint = window.activityPoints[i];
-                            const d = getDistanceFromLatLonInKm(prevPoint[0], prevPoint[1], currPoint[0], currPoint[1]);
-                            const totalDistance = (i / window.activityPoints.length) * (streams.distance[streams.distance.length - 1]);
-                            
-                            const diff = Math.abs(totalDistance - currentDistance);
-                            if (diff < minDistanceDiff) {
-                                minDistanceDiff = diff;
-                                closestPointIndex = i;
-                            }
-                        }
-                        
-                        const point = window.activityPoints[closestPointIndex];
-                        // 创建新标记
-                        window.currentMarker = L.marker([point[0], point[1]], {
-                            icon: L.divIcon({
-                                className: 'custom-div-icon',
-                                html: `
-                                    <div class="marker-pin"></div>
-                                `,
-                                iconSize: [30, 30],
-                                iconAnchor: [15, 15]
-                            })
-                        }).addTo(window.activityMap);
-                    }
                 }
             }
         });
     }
 
-    // 计算两个坐标点之间的距离（单位：公里）
+    // 计算两点之间的距离（单位：千米）
     function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
-        const R = 6371; // 地球半径（公里）
+        const R = 6371; // 地球半径（千米）
         const dLat = deg2rad(lat2 - lat1);
         const dLon = deg2rad(lon2 - lon1);
         const a = 
             Math.sin(dLat/2) * Math.sin(dLat/2) +
             Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * 
-            Math.sin(dLon/2) * Math.sin(dLon/2); 
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         return R * c;
     }
 
@@ -485,10 +546,10 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // 更新数据集显示状态
             const dataset = myChart.data.datasets.find(ds => ds.label === datasetConfigs[metric].label);
-            dataset.hidden = !isActive;
-            
-            // 更新图表
-            myChart.update();
+            if (dataset) {
+                dataset.hidden = !isActive;
+                myChart.update();
+            }
         });
     });
 

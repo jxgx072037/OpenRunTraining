@@ -400,7 +400,7 @@
         <div class="map-weather-container">
             <div id="map" class="map-container">
                 <div class="elevation-chart">
-                    <canvas id="elevationChart"></canvas>
+                    <canvas id="elevation-chart"></canvas>
                 </div>
             </div>
             
@@ -433,7 +433,6 @@
         <div class="training-advice-container" id="training-advice-container" style="display: none;">
             <h3 class="training-advice-title">
                 AI训练建议
-                <span class="loading-advice" id="loading-advice">正在生成训练建议...</span>
             </h3>
             <div class="training-advice-content" id="training-advice-content"></div>
         </div>
@@ -489,7 +488,7 @@
 <!-- 脚本区 -->
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // 缓存DOM元素
+    // 初始化页面元素引用
     const elements = {
         form: document.getElementById('upload-form'),
         fileInput: document.getElementById('file-input'),
@@ -505,8 +504,11 @@ document.addEventListener('DOMContentLoaded', function() {
         totalElevationGain: document.getElementById('total-elevation-gain'),
         totalElevationLoss: document.getElementById('total-elevation-loss'),
         averageGrade: document.getElementById('average-grade'),
-        elevationChart: document.getElementById('elevationChart'),
+        elevationChart: document.getElementById('elevation-chart'),
         weatherContainer: document.getElementById('weather-container'),
+        segmentTable: document.getElementById('segment-table-body'),
+        weatherTable: document.getElementById('weather-table-body'),
+        trainingAdvice: document.getElementById('training-advice-content')
     };
     
     let map = null;
@@ -618,6 +620,12 @@ document.addEventListener('DOMContentLoaded', function() {
     async function processGpxData(data) {
         if (!data.points || data.points.length === 0) return;
         
+        // 确保所有必需的容器都存在
+        if (!elements.dataContainer || !elements.mapContainer || !elements.weatherContainer) {
+            console.error('找不到必需的DOM元素');
+            return;
+        }
+        
         elements.dataContainer.style.display = 'block';
         elements.mapContainer.style.display = 'block';
         elements.weatherContainer.style.display = 'block';
@@ -661,8 +669,15 @@ document.addEventListener('DOMContentLoaded', function() {
         const startPoint = data.points[0];
         
         // 显示训练建议区域
-        document.getElementById('training-advice-container').style.display = 'block';
-        document.getElementById('loading-advice').style.display = 'flex';
+        const adviceContainer = document.getElementById('training-advice-container');
+        const loadingAdvice = document.getElementById('loading-advice');
+        
+        if (adviceContainer) {
+            adviceContainer.style.display = 'block';
+        }
+        if (loadingAdvice) {
+            loadingAdvice.style.display = 'flex';
+        }
         
         // 并行获取天气数据
         fetchWeatherData(startPoint[0], startPoint[1], elements.raceDate.value);
