@@ -35,6 +35,13 @@
         margin-left: 4px;
     }
     
+    .file-size-hint {
+        margin-top: 8px;
+        font-size: 13px;
+        color: #888;
+        font-style: italic;
+    }
+    
     .form-group input[type="text"] {
         width: 100%;
         padding: 8px 12px;
@@ -257,15 +264,67 @@
     
     .training-advice-content {
         font-family: monospace;
-        white-space: pre;
+        white-space: pre-wrap;
+        word-break: break-word;
         overflow: auto;
         max-height: 500px;
         border: 1px solid #ddd;
         padding: 10px;
+        width: 100%;
+        box-sizing: border-box;
+    }
+    
+    /* 针对小屏幕设备的训练建议样式 */
+    @media (max-width: 768px) {
+        .training-advice-content {
+            font-size: 14px;
+            padding: 8px;
+            max-height: 400px;
+        }
+    }
+    
+    /* 训练建议中Markdown表格的样式 */
+    .training-advice-content table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 15px 0;
+        overflow-x: auto;
+        display: block;
+    }
+    
+    .training-advice-content th,
+    .training-advice-content td {
+        border: 1px solid #ddd;
+        padding: 8px;
+        text-align: left;
+    }
+    
+    .training-advice-content th {
+        background-color: #f2f2f2;
+    }
+    
+    /* 针对小屏幕设备的表格样式 */
+    @media (max-width: 768px) {
+        .training-advice-content th,
+        .training-advice-content td {
+            padding: 5px;
+            font-size: 12px;
+        }
     }
     
     .loading-advice {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
         color: #666;
+        font-size: 16px;
+        margin-bottom: 15px;
+    }
+    
+    .loading-advice i {
+        margin-right: 10px;
+        color: #FC4C02;
     }
     
     .weather-container {
@@ -356,6 +415,76 @@
         margin-right: 10px;
         color: #FC4C02;
         }
+    
+    /* AI思考过程区域样式 */
+    .ai-thinking-section {
+        margin: 10px 0;
+        border-radius: 5px;
+        overflow: hidden;
+    }
+    
+    .ai-thinking-section summary {
+        background-color: #f0f8ff;
+        padding: 8px 12px;
+        cursor: pointer;
+        font-weight: bold;
+        border: 1px solid #cce5ff;
+        border-radius: 4px;
+    }
+    
+    .ai-thinking-section summary:hover {
+        background-color: #e6f4ff;
+    }
+    
+    .ai-thinking-section .thinking-content {
+        background-color: #f8f8f8;
+        border: 1px solid #ddd;
+        border-top: none;
+        padding: 10px;
+        color: #555;
+        font-size: 14px;
+        max-height: 300px;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+    
+    /* 项目灵感来源样式 */
+    .inspiration-credit {
+        text-align: right;
+        margin: 10px 0;
+        padding: 8px 15px;
+        font-size: 14px;
+        color: #333;
+        font-style: italic;
+        position: absolute;
+        bottom: 30px;
+        right: 10px;
+        background-color: rgba(255, 255, 255, 0.9);
+        border-radius: 4px;
+        display: inline-block;
+        z-index: 1000;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        border: 1px solid #ddd;
+    }
+    
+    .inspiration-credit a {
+        color: #FC4C02;
+        text-decoration: none;
+        font-weight: 500;
+    }
+    
+    .inspiration-credit a:hover {
+        text-decoration: underline;
+    }
+    
+    @media (max-width: 768px) {
+        .inspiration-credit {
+            font-size: 12px;
+            padding: 5px 10px;
+            bottom: 20px;
+        }
+    }
     </style>
 {% endblock %}
 
@@ -379,6 +508,7 @@
                     <input type="file" id="file-input" name="gpx_file" accept=".gpx">
                     <span class="file-name" id="file-name"></span>
                 </div>
+                <p class="file-size-hint">GPX文件大小限制：20MB以内</p>
             </div>
             
             <div class="form-group">
@@ -401,6 +531,9 @@
             <div id="map" class="map-container">
                 <div class="elevation-chart">
                     <canvas id="elevation-chart"></canvas>
+                </div>
+                <div class="inspiration-credit">
+                    项目灵感来自于：<a href="https://activities.geekplux.com/" target="_blank">Geekplus</a> 和 <a href="https://runart.net/firefly/" target="_blank">RunArt Firefly</a>
                 </div>
             </div>
             
@@ -434,6 +567,9 @@
             <h3 class="training-advice-title">
                 AI训练建议
             </h3>
+            <div id="loading-advice" class="loading-advice">
+                <i class="fas fa-spinner fa-spin"></i> 正在生成训练建议...
+            </div>
             <div class="training-advice-content" id="training-advice-content"></div>
         </div>
         
@@ -578,16 +714,34 @@ document.addEventListener('DOMContentLoaded', function() {
                 body: formData
             });
             
+            if (!response.ok) {
+                throw new Error(`上传失败: ${response.status} ${response.statusText}`);
+            }
+            
             const data = await response.json();
+            
+            // 将数据ID保存到localStorage，以便页面刷新后仍能获取训练建议
+            if (data.data_id) {
+                localStorage.setItem('openrun_data_id', data.data_id);
+                localStorage.setItem('openrun_match_date', raceDate);
+            }
             
             // 更新加载状态文本
             document.getElementById('loading-text').textContent = '正在获取该地区历史天气信息...';
             
             await processGpxData(data);
             
+            // 显示训练建议区域并获取训练建议
+            const adviceContainer = document.getElementById('training-advice-container');
+            if (adviceContainer) {
+                adviceContainer.style.display = 'block';
+                // 获取训练建议
+                fetchTrainingAdvice();
+            }
+            
         } catch (error) {
             console.error('Error:', error);
-            alert('上传文件时发生错误');
+            alert('上传文件时发生错误: ' + error.message);
         } finally {
             elements.loadingDiv.style.display = 'none';
             elements.submitBtn.disabled = false;
@@ -665,25 +819,9 @@ document.addEventListener('DOMContentLoaded', function() {
         // 创建高程图表
         createElevationChart(data.elevation_data);
         
-        // 获取并显示天气数据和训练建议（并行执行）
+        // 获取天气数据
         const startPoint = data.points[0];
-        
-        // 显示训练建议区域
-        const adviceContainer = document.getElementById('training-advice-container');
-        const loadingAdvice = document.getElementById('loading-advice');
-        
-        if (adviceContainer) {
-            adviceContainer.style.display = 'block';
-        }
-        if (loadingAdvice) {
-            loadingAdvice.style.display = 'flex';
-        }
-        
-        // 并行获取天气数据
         fetchWeatherData(startPoint[0], startPoint[1], elements.raceDate.value);
-        
-        // 获取训练建议
-        fetchTrainingAdvice();
     }
     
     // 添加起点和终点标记
@@ -1004,17 +1142,52 @@ document.addEventListener('DOMContentLoaded', function() {
         const adviceContent = document.getElementById('training-advice-content');
         const loadingAdvice = document.getElementById('loading-advice');
         
-        // 清空现有内容
-        adviceContent.textContent = '';
+        // 确保加载提示可见，隐藏之前的内容
+        if (loadingAdvice) {
+            loadingAdvice.style.display = 'flex';
+        }
         
-        // 获取比赛日期
-        const matchDate = document.getElementById('race-date').value;
+        // 清空现有内容
+        if (adviceContent) {
+            adviceContent.textContent = '';
+        }
+        
+        // 从表单或localStorage获取比赛日期
+        let matchDate = document.getElementById('race-date').value;
         if (!matchDate) {
-            adviceContent.textContent = '请选择比赛日期';
+            matchDate = localStorage.getItem('openrun_match_date');
+        }
+        
+        if (!matchDate) {
+            if (adviceContent) {
+                adviceContent.textContent = '请选择比赛日期';
+            }
+            if (loadingAdvice) {
+                loadingAdvice.style.display = 'none';
+            }
             return;
         }
 
-        const eventSource = new EventSource(`/get_training_advice?match_date=${encodeURIComponent(matchDate)}`);
+        // 获取存储的data_id
+        const dataId = localStorage.getItem('openrun_data_id');
+        
+        // 记录调试信息
+        console.log('准备获取训练建议:');
+        console.log('- 比赛日期:', matchDate);
+        console.log('- 数据ID:', dataId);
+
+        let hasReceivedData = false;
+
+        // 创建URL，包含data_id参数和match_date参数
+        let url = `/get_training_advice?match_date=${encodeURIComponent(matchDate)}`;
+        if (dataId) {
+            url += `&data_id=${encodeURIComponent(dataId)}`;
+        }
+        
+        console.log('请求URL:', url);
+
+        // 创建EventSource对象发起请求
+        const eventSource = new EventSource(url);
         
         // 处理连接打开
         eventSource.onopen = function() {
@@ -1023,25 +1196,89 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // 处理消息 - 原样展示后台返回的内容
         eventSource.onmessage = function(event) {
+            hasReceivedData = true;
             try {
                 const data = JSON.parse(event.data);
+                console.log('收到数据:', data);
                 
                 if (data.error) {
-                    adviceContent.textContent = `获取训练建议出错: ${data.error}\n\n请刷新页面重试。`;
+                    if (adviceContent) {
+                        adviceContent.innerHTML = `
+                            <div style="color: red;">
+                                <p>获取训练建议出错: ${data.error}</p>
+                                <p>可能原因:</p>
+                                <ul>
+                                    <li>GPX数据已过期或不存在</li>
+                                    <li>服务器连接问题</li>
+                                </ul>
+                                <p>请尝试以下解决方案:</p>
+                                <ul>
+                                    <li>刷新页面并重新上传GPX文件</li>
+                                    <li>检查网络连接</li>
+                                </ul>
+                                <button onclick="location.reload()">刷新页面</button>
+                                <button onclick="fetchTrainingAdvice()">重新请求</button>
+                            </div>
+                        `;
+                    }
                     eventSource.close();
-                    loadingAdvice.style.display = 'none';
+                    if (loadingAdvice) {
+                        loadingAdvice.style.display = 'none';
+                    }
                     return;
                 }
                 
                 if (data.text) {
-                    // 原样展示文本，不做任何处理
-                    adviceContent.textContent += data.text;
-                    // 自动滚动到底部
-                    adviceContent.scrollTop = adviceContent.scrollHeight;
+                    // 检查是否是think标签内的内容，并添加特殊样式
+                    if (adviceContent) {
+                        // 如果首次接收到<think>标签，创建思考区域容器
+                        if (data.text.includes('<think>') && !document.getElementById('ai-thinking-section')) {
+                            const thinkingDiv = document.createElement('div');
+                            thinkingDiv.id = 'ai-thinking-section';
+                            thinkingDiv.className = 'ai-thinking-section';
+                            thinkingDiv.innerHTML = '<details><summary>AI思考过程（点击展开/折叠）</summary><div class="thinking-content"></div></details>';
+                            adviceContent.appendChild(thinkingDiv);
+                        }
+
+                        // 处理思考内容
+                        if (document.getElementById('ai-thinking-section') && !data.text.includes('</think>')) {
+                            const thinkingContent = document.querySelector('#ai-thinking-section .thinking-content');
+                            if (thinkingContent) {
+                                thinkingContent.textContent += data.text;
+                            }
+                        } 
+                        // 如果收到结束标签，不添加到思考区域
+                        else if (data.text.includes('</think>')) {
+                            // 不处理结束标签
+                        }
+                        // 正常内容添加到主区域
+                        else {
+                            // 对于表格，进行特殊处理使其保持格式
+                            let content = data.text;
+                            
+                            // 添加到主内容区域
+                            if (content) {
+                                if (adviceContent.lastChild && adviceContent.lastChild.nodeType === Node.TEXT_NODE) {
+                                    adviceContent.lastChild.textContent += content;
+                                } else {
+                                    adviceContent.appendChild(document.createTextNode(content));
+                                }
+                            }
+                        }
+                        // 自动滚动到底部
+                        adviceContent.scrollTop = adviceContent.scrollHeight;
+                    }
+                    
+                    // 第一次接收到内容时，隐藏加载提示
+                    if (loadingAdvice && loadingAdvice.style.display !== 'none') {
+                        loadingAdvice.style.display = 'none';
+                    }
                 }
             } catch (error) {
                 console.error('处理训练建议数据出错:', error);
-                adviceContent.textContent += '\n处理数据出错，请刷新页面重试。';
+                if (adviceContent) {
+                    adviceContent.textContent += '\n处理数据出错，请刷新页面重试。';
+                }
             }
         };
         
@@ -1055,7 +1292,30 @@ document.addEventListener('DOMContentLoaded', function() {
                 eventSource.close();
             }
             
-            loadingAdvice.style.display = 'none';
+            if (loadingAdvice) {
+                loadingAdvice.style.display = 'none';
+            }
+            
+            // 只有在没有收到过数据时才显示错误信息
+            if (!hasReceivedData && adviceContent) {
+                adviceContent.innerHTML = `
+                    <div style="color: red;">
+                        <p>获取训练建议失败，可能原因:</p>
+                        <ul>
+                            <li>GPX数据已过期或不存在（data_id: ${dataId || '未设置'}）</li>
+                            <li>服务器连接问题</li>
+                            <li>大模型API调用失败</li>
+                        </ul>
+                        <p>请尝试以下解决方案:</p>
+                        <ul>
+                            <li>刷新页面并重新上传GPX文件</li>
+                            <li>检查网络连接</li>
+                        </ul>
+                        <button onclick="location.reload()">刷新页面</button>
+                        <button onclick="fetchTrainingAdvice()">重新请求</button>
+                    </div>
+                `;
+            }
         };
     }
 });

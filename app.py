@@ -11,6 +11,8 @@ from geopy.distance import geodesic
 import asyncio
 from ai_services import ai_service
 import uuid
+from werkzeug.utils import secure_filename
+import pickle  # 导入pickle模块用于数据序列化
 
 # 加载环境变量
 load_dotenv()
@@ -19,6 +21,36 @@ WEATHER_API_KEY = os.getenv('VISUAL_CROSSING_API_KEY')
 
 # 用于临时存储GPX和天气数据的字典
 temp_data_store = {}
+
+# 数据存储路径
+DATA_STORE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data_store')
+if not os.path.exists(DATA_STORE_DIR):
+    os.makedirs(DATA_STORE_DIR)
+
+# 从文件系统加载之前保存的数据
+def load_data_from_file(data_id):
+    """从文件系统加载数据"""
+    try:
+        file_path = os.path.join(DATA_STORE_DIR, f"{data_id}.pkl")
+        if os.path.exists(file_path):
+            with open(file_path, 'rb') as f:
+                return pickle.load(f)
+        return None
+    except Exception as e:
+        print(f"加载数据错误: {str(e)}")
+        return None
+
+# 保存数据到文件系统
+def save_data_to_file(data_id, data):
+    """保存数据到文件系统"""
+    try:
+        file_path = os.path.join(DATA_STORE_DIR, f"{data_id}.pkl")
+        with open(file_path, 'wb') as f:
+            pickle.dump(data, f)
+        return True
+    except Exception as e:
+        print(f"保存数据错误: {str(e)}")
+        return False
 
 def decode_polyline(encoded_polyline):
     """解码Strava的polyline编码"""
@@ -64,8 +96,21 @@ ATHLETE_URL = "https://www.strava.com/api/v3/athlete"
 ACTIVITIES_URL = "https://www.strava.com/api/v3/athlete/activities"
 ACTIVITY_URL = "https://www.strava.com/api/v3/activities/{id}"
 
+# 配置文件上传
+app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024  # 20MB
+app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
+
+# 确保上传目录存在
+if not os.path.exists(app.config['UPLOAD_FOLDER']):
+    os.makedirs(app.config['UPLOAD_FOLDER'])
+
 @app.route('/')
 def index():
+    # 展示欢迎页面，用户需要点击按钮才会跳转到Strava授权
+    return render_template('welcome.html')
+
+@app.route('/dashboard')
+def dashboard():
     # 检查令牌是否存在
     if 'access_token' not in session:
         return redirect(url_for('authorize'))
@@ -117,16 +162,16 @@ def index():
 def route_planner():
     # 检查令牌是否存在
     if 'access_token' not in session:
-        return redirect(url_for('authorize'))
+        return redirect(url_for('index'))
     
     # 检查令牌是否过期
     if is_token_expired():
         # 如果过期，尝试刷新令牌
         refreshed = refresh_token()
         if not refreshed:
-            return redirect(url_for('authorize'))
+            return redirect(url_for('index'))
             
-    return render_template('index.html')
+    return render_template('trainPlanner.html')
 
 @app.route('/authorize')
 def authorize():
@@ -161,8 +206,8 @@ def callback():
     # 保存令牌信息到session
     save_token_to_session(token_data)
     
-    # 重定向到首页
-    return redirect(url_for('index'))
+    # 重定向到仪表盘页面
+    return redirect(url_for('dashboard'))
 
 @app.route('/logout')
 def logout():
@@ -447,8 +492,22 @@ def upload_gpx():
         return jsonify({'error': '请上传GPX文件'}), 400
     
     try:
+        # 记录GPX文件上传请求
+        with open("logs/upload_gpx_debug.log", "a") as log_file:
+            log_file.write(f"\n====== GPX文件上传 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ======\n")
+            log_file.write(f"文件名: {file.filename}\n")
+            log_file.write(f"会话内容: {dict(session)}\n")
+        
+        # 保存文件到临时目录
+        temp_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(file.filename))
+        file.save(temp_path)
+        
         # 读取GPX文件
-        gpx = gpxpy.parse(file)
+        with open(temp_path, 'r') as f:
+            gpx = gpxpy.parse(f)
+        
+        # 删除临时文件
+        os.remove(temp_path)
         
         # 提取轨迹点
         points = []
@@ -503,19 +562,39 @@ def upload_gpx():
         
         # 生成唯一ID并存储数据
         data_id = str(uuid.uuid4())
-        temp_data_store[data_id] = {
+        data = {
             'gpx_data': result,
             'weather_data': [],
             'timestamp': datetime.now().timestamp()
         }
         
-        # 仅在session中存储数据ID，而不是整个数据
+        # 同时存储到内存和文件系统
+        temp_data_store[data_id] = data
+        save_data_to_file(data_id, data)
+        
+        # 记录生成的数据ID和数据存储情况
+        with open("logs/upload_gpx_debug.log", "a") as log_file:
+            log_file.write(f"生成的数据ID: {data_id}\n")
+            log_file.write(f"数据存储情况: gpx_data已保存, 数据包含 {len(points)} 个轨迹点\n")
+            log_file.write(f"temp_data_store中的keys: {list(temp_data_store.keys())}\n")
+            log_file.write(f"文件存储路径: {os.path.join(DATA_STORE_DIR, f'{data_id}.pkl')}\n")
+        
+        # 仅在session中存储数据ID
         session['data_id'] = data_id
+        session.modified = True  # 明确标记session已修改，确保保存
+        
+        # 记录session保存情况
+        with open("logs/upload_gpx_debug.log", "a") as log_file:
+            log_file.write(f"session中保存的data_id: {session.get('data_id')}\n")
+            log_file.write(f"完整session内容: {dict(session)}\n")
+        
+        # 在返回数据中包含data_id，便于前端存储
+        result['data_id'] = data_id
         
         return jsonify(result)
-    
     except Exception as e:
-        return jsonify({'error': str(e)}), 400
+        app.logger.error(f"处理GPX文件时出错: {str(e)}")
+        return jsonify({'error': f'处理GPX文件时出错: {str(e)}'}), 400
 
 def get_historical_weather(lat, lon, target_date):
     """
@@ -578,15 +657,45 @@ def get_weather_data():
         
         # 检查session中是否有数据ID
         data_id = session.get('data_id')
-        if data_id and data_id in temp_data_store:
-            # 更新存储的天气数据
-            temp_data_store[data_id]['weather_data'] = historical_weather
+        if data_id:
+            # 先检查内存数据
+            if data_id in temp_data_store:
+                # 更新内存中的天气数据
+                temp_data_store[data_id]['weather_data'] = historical_weather
+                # 同时更新文件系统
+                save_data_to_file(data_id, temp_data_store[data_id])
+                print(f"已更新内存和文件系统中的天气数据: {data_id}")
+            else:
+                # 尝试从文件系统加载
+                stored_data = load_data_from_file(data_id)
+                if stored_data:
+                    # 更新数据
+                    stored_data['weather_data'] = historical_weather
+                    # 保存到内存和文件系统
+                    temp_data_store[data_id] = stored_data
+                    save_data_to_file(data_id, stored_data)
+                    print(f"已从文件加载并更新天气数据: {data_id}")
+                else:
+                    print(f"未找到数据ID来更新天气: {data_id}")
+            
+            # 记录日志
+            with open("logs/weather_data_debug.log", "a") as log_file:
+                log_file.write(f"\n====== 更新天气数据 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ======\n")
+                log_file.write(f"数据ID: {data_id}\n")
+                log_file.write(f"获取到天气数据: {len(historical_weather)} 条记录\n")
+                log_file.write(f"内存中是否存在此ID: {data_id in temp_data_store}\n")
+                file_path = os.path.join(DATA_STORE_DIR, f"{data_id}.pkl")
+                log_file.write(f"文件是否存在: {os.path.exists(file_path)}\n")
         
         return jsonify({
             'status': 'success',
             'data': historical_weather
         })
     except Exception as e:
+        print(f"获取天气数据出错: {str(e)}")
+        with open("logs/weather_data_debug.log", "a") as log_file:
+            log_file.write(f"\n====== 天气数据错误 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ======\n")
+            log_file.write(f"错误: {str(e)}\n")
         return jsonify({
             'status': 'error',
             'message': str(e)
@@ -598,25 +707,80 @@ def get_training_advice():
     获取训练建议的流式响应
     """
     try:
-        # 从session获取数据ID
-        data_id = session.get('data_id')
-        if not data_id or data_id not in temp_data_store:
+        # 添加调试日志
+        print("\n====== 训练建议请求 ======")
+        print(f"会话内容: {dict(session)}")
+        print(f"临时数据存储Keys: {list(temp_data_store.keys())}")
+        print(f"请求参数: {request.args}")
+        
+        # 记录到日志文件
+        with open("logs/training_advice_debug.log", "a") as log_file:
+            log_file.write("\n====== 训练建议请求 ======\n")
+            log_file.write(f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            log_file.write(f"会话内容: {dict(session)}\n")
+            log_file.write(f"临时数据存储Keys: {list(temp_data_store.keys())}\n")
+            log_file.write(f"数据存储目录文件数: {len(os.listdir(DATA_STORE_DIR))}\n")
+            log_file.write(f"请求参数: {request.args}\n")
+        
+        # 首先尝试从URL参数获取data_id，如果没有再从session获取
+        data_id = request.args.get('data_id')
+        if not data_id:
+            data_id = session.get('data_id')
+            
+        print(f"使用的data_id: {data_id}")
+        with open("logs/training_advice_debug.log", "a") as log_file:
+            log_file.write(f"使用的data_id: {data_id}\n")
+        
+        # 先检查内存中是否有数据
+        stored_data = None
+        data_source = "未找到"
+        
+        if data_id in temp_data_store:
+            stored_data = temp_data_store[data_id]
+            data_source = "内存"
+        else:
+            # 如果内存中没有，尝试从文件加载
+            file_data = load_data_from_file(data_id)
+            if file_data:
+                # 找到文件数据，同时更新内存
+                stored_data = file_data
+                temp_data_store[data_id] = file_data  # 更新内存数据
+                data_source = "文件"
+        
+        # 记录数据来源
+        with open("logs/training_advice_debug.log", "a") as log_file:
+            log_file.write(f"数据来源: {data_source}\n")
+        
+        if not stored_data:
             print(f"未找到数据ID: {data_id}")
+            with open("logs/training_advice_debug.log", "a") as log_file:
+                log_file.write(f"未找到数据ID: {data_id}\n")
+                log_file.write(f"原因: {'data_id为空' if not data_id else '内存和文件系统中都未找到此data_id'}\n")
+                log_file.write(f"内存中的keys: {list(temp_data_store.keys())}\n")
+                log_file.write(f"查找的文件路径: {os.path.join(DATA_STORE_DIR, f'{data_id}.pkl')}\n")
+                log_file.write(f"该文件是否存在: {os.path.exists(os.path.join(DATA_STORE_DIR, f'{data_id}.pkl'))}\n")
             return jsonify({'error': '未找到GPX数据，请先上传路线'}), 400
         
         # 从请求参数中获取比赛日期
         match_date = request.args.get('match_date')
         if not match_date:
+            with open("logs/training_advice_debug.log", "a") as log_file:
+                log_file.write("错误: 未提供比赛日期\n")
             return jsonify({'error': '请提供比赛日期'}), 400
         
         # 从存储中获取数据
-        stored_data = temp_data_store[data_id]
         gpx_data = stored_data.get('gpx_data')
         weather_data = stored_data.get('weather_data', [])
+        
+        # 记录获取到的数据
+        with open("logs/training_advice_debug.log", "a") as log_file:
+            log_file.write(f"获取到数据: data_id={data_id}, gpx_data存在={gpx_data is not None}, weather_data长度={len(weather_data)}\n")
         
         # 确保数据结构完整
         if not gpx_data or not isinstance(gpx_data, dict) or 'stats' not in gpx_data:
             print("GPX数据结构不完整:", gpx_data)
+            with open("logs/training_advice_debug.log", "a") as log_file:
+                log_file.write(f"错误: GPX数据结构不完整: {gpx_data}\n")
             return jsonify({'error': 'GPX数据不完整，请重新上传'}), 400
         
         # 创建一个标准生成器函数，包装异步生成器的结果
@@ -665,15 +829,23 @@ def cleanup_temp_data():
     current_time = datetime.now().timestamp()
     expired_ids = []
     
+    with open("logs/cleanup_temp_data.log", "a") as log_file:
+        log_file.write(f"\n====== 清理临时数据 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ======\n")
+        log_file.write(f"当前数据ID列表: {list(temp_data_store.keys())}\n")
+    
     for data_id, data in temp_data_store.items():
-        # 数据存储超过30分钟则清理
-        if current_time - data.get('timestamp', 0) > 30 * 60:
+        # 数据存储超过24小时则清理（原先是2小时）
+        if current_time - data.get('timestamp', 0) > 24 * 60 * 60:
             expired_ids.append(data_id)
     
     for data_id in expired_ids:
+        print(f"清理过期数据ID: {data_id}")
+        with open("logs/cleanup_temp_data.log", "a") as log_file:
+            log_file.write(f"清理过期数据ID: {data_id}, 存储时间: {datetime.fromtimestamp(temp_data_store[data_id].get('timestamp', 0)).strftime('%Y-%m-%d %H:%M:%S')}\n")
         temp_data_store.pop(data_id, None)
-        
-# 添加定时器来定期清理数据（可以使用apscheduler等库实现）
+    
+    with open("logs/cleanup_temp_data.log", "a") as log_file:
+        log_file.write(f"清理后的数据ID列表: {list(temp_data_store.keys())}\n")
 
 @app.route('/activity/<int:activity_id>')
 def activity_detail(activity_id):
@@ -800,6 +972,15 @@ def format_duration(seconds):
     if hours > 0:
         return f"{hours}:{minutes:02d}:{seconds:02d}"
     return f"{minutes}:{seconds:02d}"
+
+@app.route('/debug/temp_data_store')
+def debug_temp_data_store():
+    """调试路由，返回temp_data_store的内容"""
+    return {
+        'keys': list(temp_data_store.keys()),
+        'count': len(temp_data_store),
+        'session_data_id': session.get('data_id')
+    }
 
 if __name__ == '__main__':
     # 确保templates目录存在
