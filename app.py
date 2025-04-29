@@ -1,4 +1,4 @@
-from flask import Flask, request, redirect, url_for, render_template, session, send_from_directory, jsonify, Response
+from flask import Flask, request, redirect, url_for, render_template, session, send_from_directory, jsonify, Response, make_response
 import requests
 import os
 import json
@@ -9,10 +9,13 @@ import gpxpy
 import gpxpy.gpx
 from geopy.distance import geodesic
 import asyncio
-from ai_services import ai_service
+from ai_services import AIService  # 修正导入方式
 import uuid
 from werkzeug.utils import secure_filename
 import pickle  # 导入pickle模块用于数据序列化
+import secrets
+import time
+import aiohttp
 
 # 加载环境变量
 load_dotenv()
@@ -103,6 +106,17 @@ app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(os.path.abspath(__fil
 # 确保上传目录存在
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
+
+# 初始化AI服务
+ai_service = AIService()  # 修正初始化方式
+
+# 添加全局CORS处理
+@app.after_request
+def add_cors_headers(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+    return response
 
 @app.route('/')
 def index():
@@ -772,6 +786,18 @@ def get_training_advice():
         gpx_data = stored_data.get('gpx_data')
         weather_data = stored_data.get('weather_data', [])
         
+        # 检查是否使用自定义提示词
+        use_custom_prompts = request.args.get('custom_prompts', 'false').lower() == 'true'
+        custom_system_prompt = session.get('custom_system_prompt', '')
+        custom_user_prompt = session.get('custom_user_prompt', '')
+        
+        # 记录提示词使用情况
+        with open("logs/training_advice_debug.log", "a") as log_file:
+            log_file.write(f"使用自定义提示词: {use_custom_prompts}\n")
+            if use_custom_prompts:
+                log_file.write(f"自定义系统提示词长度: {len(custom_system_prompt)}\n")
+                log_file.write(f"自定义用户提示词长度: {len(custom_user_prompt)}\n")
+        
         # 记录获取到的数据
         with open("logs/training_advice_debug.log", "a") as log_file:
             log_file.write(f"获取到数据: data_id={data_id}, gpx_data存在={gpx_data is not None}, weather_data长度={len(weather_data)}\n")
@@ -791,10 +817,23 @@ def get_training_advice():
             # 包装异步生成器的协程
             async def fetch_chunks():
                 try:
-                    async for text_chunk in ai_service.generate_training_advice_stream(gpx_data, weather_data, match_date):
-                        # 确保文本是字符串并转义JSON特殊字符
-                        if isinstance(text_chunk, str):
-                            yield f"data: {json.dumps({'text': text_chunk})}\n\n"
+                    # 根据是否使用自定义提示词来调用不同的方法
+                    if use_custom_prompts and custom_system_prompt and custom_user_prompt:
+                        async for text_chunk in ai_service.generate_training_advice_stream_with_custom_prompts(
+                            gpx_data, 
+                            weather_data, 
+                            match_date, 
+                            custom_system_prompt, 
+                            custom_user_prompt
+                        ):
+                            # 确保文本是字符串并转义JSON特殊字符
+                            if isinstance(text_chunk, str):
+                                yield f"data: {json.dumps({'text': text_chunk})}\n\n"
+                    else:
+                        async for text_chunk in ai_service.generate_training_advice_stream(gpx_data, weather_data, match_date):
+                            # 确保文本是字符串并转义JSON特殊字符
+                            if isinstance(text_chunk, str):
+                                yield f"data: {json.dumps({'text': text_chunk})}\n\n"
                 except Exception as e:
                     error_msg = str(e)
                     print(f"生成训练建议时出错: {error_msg}")
@@ -981,6 +1020,147 @@ def debug_temp_data_store():
         'count': len(temp_data_store),
         'session_data_id': session.get('data_id')
     }
+
+@app.route('/get_default_prompts')
+def get_default_prompts():
+    """获取默认的系统提示词和用户提示词"""
+    try:
+        # 添加日志记录请求信息
+        print("\n====== 获取默认提示词请求 ======")
+        print(f"请求URL: {request.url}")
+        print(f"请求方法: {request.method}")
+        print(f"请求头: {request.headers}")
+        
+        with open("logs/prompt_debug.log", "a") as log_file:
+            log_file.write("\n====== 获取默认提示词请求 ======\n")
+            log_file.write(f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            log_file.write(f"请求URL: {request.url}\n")
+            log_file.write(f"请求方法: {request.method}\n")
+            log_file.write(f"请求头: {dict(request.headers)}\n")
+        
+        system_prompt = ai_service.system_prompt
+        
+        # 构建一个示例用户提示词，不包含具体数据
+        user_prompt = """根据以下比赛路线和天气数据，提供详细的训练建议。
+
+## 比赛路线数据:
+- 总距离: {total_distance:.2f} 公里;
+- 总爬升: {elevation_gain:.0f} 米;
+- 总下降: {elevation_loss:.0f} 米;
+- 平均坡度: {avg_grade:.1f}%;
+- 分段数据：{km_data_text};
+
+## 比赛日当天的天气预报数据:
+{weather_summary}
+
+## 当前时间:
+{time_now_str}
+
+## 比赛时间:
+{match_date}
+"""
+        
+        response = jsonify({
+            'status': 'success',
+            'system_prompt': system_prompt,
+            'user_prompt': user_prompt
+        })
+        
+        # 记录响应信息
+        with open("logs/prompt_debug.log", "a") as log_file:
+            log_file.write(f"响应状态: 200 OK\n")
+            log_file.write(f"响应头: {dict(response.headers)}\n")
+        
+        return response
+    except Exception as e:
+        error_msg = str(e)
+        print(f"获取默认提示词出错: {error_msg}")
+        
+        with open("logs/prompt_debug.log", "a") as log_file:
+            log_file.write(f"错误: {error_msg}\n")
+            import traceback
+            log_file.write(f"堆栈跟踪: {traceback.format_exc()}\n")
+        
+        response = jsonify({
+            'status': 'error',
+            'message': error_msg
+        })
+        
+        return response, 500
+
+@app.route('/submit_custom_prompts', methods=['POST'])
+def submit_custom_prompts():
+    """接收用户自定义的提示词"""
+    try:
+        # 添加日志记录请求信息
+        print("\n====== 提交自定义提示词请求 ======")
+        print(f"请求URL: {request.url}")
+        print(f"请求方法: {request.method}")
+        print(f"请求头: {request.headers}")
+        
+        with open("logs/prompt_debug.log", "a") as log_file:
+            log_file.write("\n====== 提交自定义提示词请求 ======\n")
+            log_file.write(f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            log_file.write(f"请求URL: {request.url}\n")
+            log_file.write(f"请求方法: {request.method}\n")
+            log_file.write(f"请求头: {dict(request.headers)}\n")
+        
+        data = request.get_json()
+        system_prompt = data.get('system_prompt', '')
+        user_prompt = data.get('user_prompt', '')
+        
+        # 记录请求参数
+        with open("logs/prompt_debug.log", "a") as log_file:
+            log_file.write(f"系统提示词长度: {len(system_prompt)}\n")
+            log_file.write(f"用户提示词长度: {len(user_prompt)}\n")
+        
+        # 保存到会话中，以便后续请求使用
+        session['custom_system_prompt'] = system_prompt
+        session['custom_user_prompt'] = user_prompt
+        
+        response = jsonify({
+            'status': 'success',
+            'message': '自定义提示词已保存'
+        })
+        
+        # 记录响应信息
+        with open("logs/prompt_debug.log", "a") as log_file:
+            log_file.write(f"响应状态: 200 OK\n")
+            log_file.write(f"响应头: {dict(response.headers)}\n")
+        
+        return response
+    except Exception as e:
+        error_msg = str(e)
+        print(f"提交自定义提示词出错: {error_msg}")
+        
+        with open("logs/prompt_debug.log", "a") as log_file:
+            log_file.write(f"错误: {error_msg}\n")
+            import traceback
+            log_file.write(f"堆栈跟踪: {traceback.format_exc()}\n")
+        
+        response = jsonify({
+            'status': 'error',
+            'message': error_msg
+        })
+        
+        return response, 500
+
+# 处理CORS预检请求的路由
+@app.route('/get_default_prompts', methods=['OPTIONS'])
+def options_default_prompts():
+    response = app.make_default_options_response()
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+    return response
+
+@app.route('/submit_custom_prompts', methods=['OPTIONS'])
+def options_submit_prompts():
+    response = app.make_default_options_response()
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+    return response
 
 if __name__ == '__main__':
     # 确保templates目录存在

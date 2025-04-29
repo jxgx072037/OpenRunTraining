@@ -449,6 +449,40 @@
         word-break: break-word;
     }
     
+    /* 自定义提示词样式 */
+    .customize-prompt-container {
+        margin-bottom: 20px;
+    }
+    
+    .customize-prompt-container textarea {
+        font-family: monospace;
+        font-size: 14px;
+        line-height: 1.5;
+        resize: vertical;
+    }
+    
+    .customize-prompt-container .card-header {
+        background-color: #f8f9fa;
+    }
+    
+    .customize-prompt-container .form-text {
+        color: #6c757d;
+        font-size: 12px;
+        margin-top: 4px;
+    }
+    
+    #generate-advice-btn {
+        padding: 12px;
+        font-weight: 600;
+        font-size: 16px;
+        transition: all 0.3s;
+    }
+    
+    #generate-advice-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(252, 76, 2, 0.3);
+    }
+    
     /* 项目灵感来源样式 */
     .inspiration-credit {
         text-align: right;
@@ -567,7 +601,44 @@
             <h3 class="training-advice-title">
                 AI训练建议
             </h3>
-            <div id="loading-advice" class="loading-advice">
+            <div class="customize-prompt-container">
+                <div class="card mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">自定义提示词</h5>
+                        <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#promptCollapse">
+                            <i class="fas fa-cog"></i> 显示/隐藏
+                        </button>
+                    </div>
+                    <div class="collapse" id="promptCollapse">
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group mb-3">
+                                        <label for="system-prompt" class="form-label">系统提示词 (System Prompt)</label>
+                                        <textarea class="form-control" id="system-prompt" rows="12" placeholder="输入自定义系统提示词，或使用默认设置"></textarea>
+                                        <div class="form-text">系统提示词定义AI的角色和行为准则，如不确定请使用默认配置</div>
+                                        <button class="btn btn-sm btn-outline-secondary mt-2" id="reset-system-prompt">恢复默认</button>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group mb-3">
+                                        <label for="user-prompt" class="form-label">用户提示词 (Prompt)</label>
+                                        <textarea class="form-control" id="user-prompt" rows="12" placeholder="输入自定义用户提示词，或使用默认设置"></textarea>
+                                        <div class="form-text">用户提示词描述具体任务要求，如不确定请使用默认配置</div>
+                                        <button class="btn btn-sm btn-outline-secondary mt-2" id="reset-user-prompt">恢复默认</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="d-grid gap-2 mb-4">
+                    <button class="btn btn-strava btn-lg" id="generate-advice-btn">
+                        <i class="fas fa-robot me-2"></i> 生成AI训练建议
+                    </button>
+                </div>
+            </div>
+            <div id="loading-advice" class="loading-advice" style="display: none;">
                 <i class="fas fa-spinner fa-spin"></i> 正在生成训练建议...
             </div>
             <div class="training-advice-content" id="training-advice-content"></div>
@@ -644,7 +715,14 @@ document.addEventListener('DOMContentLoaded', function() {
         weatherContainer: document.getElementById('weather-container'),
         segmentTable: document.getElementById('segment-table-body'),
         weatherTable: document.getElementById('weather-table-body'),
-        trainingAdvice: document.getElementById('training-advice-content')
+        trainingAdvice: document.getElementById('training-advice-content'),
+        trainingAdviceContainer: document.getElementById('training-advice-container'),
+        loadingAdvice: document.getElementById('loading-advice'),
+        systemPrompt: document.getElementById('system-prompt'),
+        userPrompt: document.getElementById('user-prompt'),
+        resetSystemPrompt: document.getElementById('reset-system-prompt'),
+        resetUserPrompt: document.getElementById('reset-user-prompt'),
+        generateAdviceBtn: document.getElementById('generate-advice-btn')
     };
     
     let map = null;
@@ -731,12 +809,12 @@ document.addEventListener('DOMContentLoaded', function() {
             
             await processGpxData(data);
             
-            // 显示训练建议区域并获取训练建议
+            // 显示训练建议区域并获取默认提示词
             const adviceContainer = document.getElementById('training-advice-container');
             if (adviceContainer) {
                 adviceContainer.style.display = 'block';
-                // 获取训练建议
-                fetchTrainingAdvice();
+                // 获取默认提示词
+                fetchDefaultPrompts();
             }
             
         } catch (error) {
@@ -1171,10 +1249,16 @@ document.addEventListener('DOMContentLoaded', function() {
         // 获取存储的data_id
         const dataId = localStorage.getItem('openrun_data_id');
         
+        // 获取自定义提示词
+        const systemPrompt = elements.systemPrompt.value;
+        const userPrompt = elements.userPrompt.value;
+        
         // 记录调试信息
         console.log('准备获取训练建议:');
         console.log('- 比赛日期:', matchDate);
         console.log('- 数据ID:', dataId);
+        console.log('- 系统提示词长度:', systemPrompt.length);
+        console.log('- 用户提示词长度:', userPrompt.length);
 
         let hasReceivedData = false;
 
@@ -1186,12 +1270,46 @@ document.addEventListener('DOMContentLoaded', function() {
         
         console.log('请求URL:', url);
 
+        // 创建包含提示词的请求体
+        const requestBody = {
+            system_prompt: systemPrompt,
+            user_prompt: userPrompt
+        };
+
         // 创建EventSource对象发起请求
-        const eventSource = new EventSource(url);
+        const eventSource = new EventSource(url + '&custom_prompts=true');
         
         // 处理连接打开
         eventSource.onopen = function() {
             console.log('训练建议EventSource连接已打开');
+            
+            // 发送POST请求提交自定义提示词
+            fetch('/submit_custom_prompts', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestBody)
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('自定义提示词提交成功:', data);
+            })
+            .catch(error => {
+                console.error('自定义提示词提交失败:', error);
+                eventSource.close();
+                if (adviceContent) {
+                    adviceContent.innerHTML = `
+                        <div style="color: red;">
+                            <p>提交自定义提示词失败: ${error}</p>
+                            <button onclick="fetchTrainingAdvice()">重新尝试</button>
+                        </div>
+                    `;
+                }
+                if (loadingAdvice) {
+                    loadingAdvice.style.display = 'none';
+                }
+            });
         };
         
         // 处理消息 - 原样展示后台返回的内容
@@ -1317,6 +1435,62 @@ document.addEventListener('DOMContentLoaded', function() {
                 `;
             }
         };
+    }
+
+    // 获取默认提示词
+    async function fetchDefaultPrompts() {
+        try {
+            const response = await fetch('/get_default_prompts');
+            const data = await response.json();
+            
+            if (data.status === 'success') {
+                elements.systemPrompt.value = data.system_prompt;
+                elements.userPrompt.value = data.user_prompt;
+            } else {
+                console.error('获取默认提示词失败:', data.message);
+            }
+        } catch (error) {
+            console.error('获取默认提示词出错:', error);
+        }
+    }
+    
+    // 重置系统提示词按钮事件
+    if (elements.resetSystemPrompt) {
+        elements.resetSystemPrompt.addEventListener('click', async function() {
+            try {
+                const response = await fetch('/get_default_prompts');
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    elements.systemPrompt.value = data.system_prompt;
+                }
+            } catch (error) {
+                console.error('重置系统提示词出错:', error);
+            }
+        });
+    }
+    
+    // 重置用户提示词按钮事件
+    if (elements.resetUserPrompt) {
+        elements.resetUserPrompt.addEventListener('click', async function() {
+            try {
+                const response = await fetch('/get_default_prompts');
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    elements.userPrompt.value = data.user_prompt;
+                }
+            } catch (error) {
+                console.error('重置用户提示词出错:', error);
+            }
+        });
+    }
+    
+    // 生成训练建议按钮事件
+    if (elements.generateAdviceBtn) {
+        elements.generateAdviceBtn.addEventListener('click', function() {
+            fetchTrainingAdvice();
+        });
     }
 });
 </script>
