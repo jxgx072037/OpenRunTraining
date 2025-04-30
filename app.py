@@ -123,6 +123,11 @@ def index():
     # 展示欢迎页面，用户需要点击按钮才会跳转到Strava授权
     return render_template('welcome.html')
 
+@app.route('/about')
+def about():
+    # 展示关于页面
+    return render_template('about.html')
+
 @app.route('/dashboard')
 def dashboard():
     # 检查令牌是否存在
@@ -811,12 +816,30 @@ def get_training_advice():
         
         # 创建一个标准生成器函数，包装异步生成器的结果
         def generate():
+            # 发送一个注释作为保活消息
+            yield "data: {\"text\": \"正在准备训练建议...\"}\n\n"
+            
             # 创建事件循环
             loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
             
             # 包装异步生成器的协程
             async def fetch_chunks():
                 try:
+                    # 记录开始时间
+                    start_time = time.time()
+                    
+                    # 上次发送数据的时间
+                    last_ping_time = start_time
+                    ping_interval = 10  # 10秒发送一次保活消息
+                    
+                    # 构建请求超时设置
+                    timeout = aiohttp.ClientTimeout(total=300)  # 5分钟总超时
+                    
+                    # 初始化缓冲区和计数器
+                    buffer = ""
+                    buffer_size = 1  # 调整为较小的值使更快响应
+                    
                     # 根据是否使用自定义提示词来调用不同的方法
                     if use_custom_prompts and custom_system_prompt and custom_user_prompt:
                         async for text_chunk in ai_service.generate_training_advice_stream_with_custom_prompts(
@@ -824,19 +847,64 @@ def get_training_advice():
                             weather_data, 
                             match_date, 
                             custom_system_prompt, 
-                            custom_user_prompt
+                            custom_user_prompt,
+                            timeout=timeout
                         ):
-                            # 确保文本是字符串并转义JSON特殊字符
+                            # 确保文本是字符串
                             if isinstance(text_chunk, str):
-                                yield f"data: {json.dumps({'text': text_chunk})}\n\n"
+                                # 添加到缓冲区
+                                buffer += text_chunk
+                                
+                                # 发送保活消息
+                                current_time = time.time()
+                                if current_time - last_ping_time > ping_interval:
+                                    yield f"data: {json.dumps({'ping': True})}\n\n"
+                                    last_ping_time = current_time
+                                
+                                # 当缓冲区达到一定大小或包含完整句子时发送
+                                if len(buffer) >= buffer_size or any(end in buffer for end in ['.', '!', '?', '\n']):
+                                    yield f"data: {json.dumps({'text': buffer})}\n\n"
+                                    buffer = ""
                     else:
-                        async for text_chunk in ai_service.generate_training_advice_stream(gpx_data, weather_data, match_date):
-                            # 确保文本是字符串并转义JSON特殊字符
+                        async for text_chunk in ai_service.generate_training_advice_stream(
+                            gpx_data, 
+                            weather_data, 
+                            match_date,
+                            timeout=timeout
+                        ):
+                            # 确保文本是字符串
                             if isinstance(text_chunk, str):
-                                yield f"data: {json.dumps({'text': text_chunk})}\n\n"
+                                # 添加到缓冲区
+                                buffer += text_chunk
+                                
+                                # 发送保活消息
+                                current_time = time.time()
+                                if current_time - last_ping_time > ping_interval:
+                                    yield f"data: {json.dumps({'ping': True})}\n\n"
+                                    last_ping_time = current_time
+                                
+                                # 当缓冲区达到一定大小或包含完整句子时发送
+                                if len(buffer) >= buffer_size or any(end in buffer for end in ['.', '!', '?', '\n']):
+                                    yield f"data: {json.dumps({'text': buffer})}\n\n"
+                                    buffer = ""
+                    
+                    # 发送剩余的缓冲区内容
+                    if buffer:
+                        yield f"data: {json.dumps({'text': buffer})}\n\n"
+                    
+                    # 发送完成消息
+                    yield f"data: {json.dumps({'complete': True})}\n\n"
+                    
                 except Exception as e:
                     error_msg = str(e)
                     print(f"生成训练建议时出错: {error_msg}")
+                    import traceback
+                    trace = traceback.format_exc()
+                    print(f"错误堆栈: {trace}")
+                    with open("logs/training_advice_error.log", "a") as log_file:
+                        log_file.write(f"\n====== 训练建议错误 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ======\n")
+                        log_file.write(f"错误信息: {error_msg}\n")
+                        log_file.write(f"堆栈信息: {trace}\n")
                     yield f"data: {json.dumps({'error': error_msg})}\n\n"
             
             # 创建一个任务用于获取所有chunks
@@ -858,9 +926,26 @@ def get_training_advice():
             finally:
                 loop.close()
         
-        return Response(generate(), mimetype='text/event-stream')
+        # 设置响应头，禁用缓存
+        headers = {
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no'  # 禁用Nginx缓冲
+        }
+        
+        return Response(
+            generate(), 
+            mimetype='text/event-stream', 
+            headers=headers
+        )
     except Exception as e:
         print(f"训练建议路由出错: {str(e)}")
+        import traceback
+        trace = traceback.format_exc()
+        print(f"错误堆栈: {trace}")
+        with open("logs/training_advice_error.log", "a") as log_file:
+            log_file.write(f"\n====== 训练建议路由错误 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ======\n")
+            log_file.write(f"错误信息: {str(e)}\n")
+            log_file.write(f"堆栈信息: {trace}\n")
         return jsonify({'error': str(e)}), 500
 
 # 定期清理临时数据

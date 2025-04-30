@@ -29,7 +29,6 @@ class AIService:
         请基于提供的比赛路线数据分析，给出专业、细致且针对性的训练建议。
         1. 先分析赛道数据特征，主要关注每个赛段的爬升、下降以及坡度；
         2. 根据赛道数据特征，给出训练建议。训练地形要和赛道数据特征匹配。
-        3. 输出的建议要简洁，不要超过200字。
 
         ## 原则
         1. 在最接近比赛日时训练特殊性最显著的生理机能，远离比赛日时训练一般性的生理机能；
@@ -55,9 +54,15 @@ class AIService:
 
         """
     
-    async def generate_training_advice_stream(self, gpx_data, weather_data, match_date):
+    async def generate_training_advice_stream(self, gpx_data, weather_data, match_date, timeout=None):
         """
         根据GPX和天气数据生成训练建议，使用流式响应
+        
+        Args:
+            gpx_data: GPX数据对象
+            weather_data: 天气数据列表
+            match_date: 比赛日期
+            timeout: 请求超时设置
         """
         # 准备路线数据
         total_distance = gpx_data['stats']['distance']
@@ -175,46 +180,62 @@ class AIService:
         content = ""
         reasoning_content_end_flag = False
         
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{self.base_url}/chat/completions",
-                headers=self.headers,
-                json=payload
-            ) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise Exception(f"DeepSeek API错误: {response.status} - {error_text}")
-                
-                # 先输出<think>标签
-                yield "<think>"
-                
-                # 处理流式响应
-                async for line in response.content:
-                    try:
-                        line = line.decode('utf-8').strip()
-                        if line == "data: [DONE]":
-                            break
-                        if line.startswith('data: '):
-                            data = line[6:].strip()
-                            delta = json.loads(data)['choices'][0]['delta']
-                            content = delta.get('content')
-                            reasoning_content = delta.get('reasoning_content')
-                            
-                            # 输出推理内容
-                            if reasoning_content:
-                                yield reasoning_content
-                            # 输出正文内容
-                            elif content:
-                                # 如果是第一次收到正文内容
-                                if not reasoning_content_end_flag:
-                                    yield "\n</think>\n"
-                                    reasoning_content_end_flag = True
-                                yield content
-                    except Exception as e:
-                        print(f"错误处理流式响应: {e}")
-                        continue
+        # 获取实际的超时设置
+        actual_timeout = timeout or aiohttp.ClientTimeout(total=300)
+        
+        # 创建ClientSession时设置合理的超时
+        async with aiohttp.ClientSession(timeout=actual_timeout) as session:
+            try:
+                # 设置请求超时
+                async with session.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=self.headers,
+                    json=payload,
+                    timeout=actual_timeout
+                ) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        raise Exception(f"DeepSeek API错误: {response.status} - {error_text}")
+                    
+                    # 先输出<think>标签
+                    yield "<think>"
+                    
+                    # 处理流式响应
+                    async for line in response.content:
+                        try:
+                            line = line.decode('utf-8').strip()
+                            if line == "data: [DONE]":
+                                break
+                            if line.startswith('data: '):
+                                data = line[6:].strip()
+                                delta = json.loads(data)['choices'][0]['delta']
+                                content = delta.get('content')
+                                reasoning_content = delta.get('reasoning_content')
+                                
+                                # 输出推理内容
+                                if reasoning_content:
+                                    yield reasoning_content
+                                # 输出正文内容
+                                elif content:
+                                    # 如果是第一次收到正文内容
+                                    if not reasoning_content_end_flag:
+                                        yield "\n</think>\n"
+                                        reasoning_content_end_flag = True
+                                    yield content
+                        except Exception as e:
+                            print(f"错误处理流式响应: {e}")
+                            # 继续处理下一行，不中断整个流
+                            continue
+            except asyncio.TimeoutError:
+                print("AI请求超时")
+                yield "\n\n生成训练建议超时，请重试。"
+            except Exception as e:
+                print(f"AI请求异常: {e}")
+                import traceback
+                print(f"错误堆栈: {traceback.format_exc()}")
+                yield f"\n\nAI请求出错: {str(e)}"
 
-    async def generate_training_advice_stream_with_custom_prompts(self, gpx_data, weather_data, match_date, custom_system_prompt, custom_user_prompt):
+    async def generate_training_advice_stream_with_custom_prompts(self, gpx_data, weather_data, match_date, custom_system_prompt, custom_user_prompt, timeout=None):
         """
         使用自定义提示词根据GPX和天气数据生成训练建议，使用流式响应
         
@@ -224,6 +245,7 @@ class AIService:
             match_date: 比赛日期
             custom_system_prompt: 用户自定义的系统提示词
             custom_user_prompt: 用户自定义的用户提示词
+            timeout: 请求超时设置
         """
         # 准备路线数据
         total_distance = gpx_data['stats']['distance']
@@ -304,8 +326,8 @@ class AIService:
         time_now = datetime.datetime.now()
         time_now_str = time_now.strftime("%Y-%m-%d")
         
-        # 处理自定义用户提示词，填充实际数据
-        prompt = custom_user_prompt.format(
+        # 使用自定义用户提示词模板，填充实际数据
+        user_prompt = custom_user_prompt.format(
             total_distance=total_distance,
             elevation_gain=elevation_gain,
             elevation_loss=elevation_loss,
@@ -321,7 +343,7 @@ class AIService:
             "model": "deepseek-reasoner",
             "messages": [
                 {"role": "system", "content": custom_system_prompt},
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": user_prompt}
             ],
             "stream": True,
             "max_tokens": 4096  # 最大token数
@@ -332,44 +354,60 @@ class AIService:
         content = ""
         reasoning_content_end_flag = False
         
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{self.base_url}/chat/completions",
-                headers=self.headers,
-                json=payload
-            ) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise Exception(f"DeepSeek API错误: {response.status} - {error_text}")
-                
-                # 先输出<think>标签
-                yield "<think>"
-                
-                # 处理流式响应
-                async for line in response.content:
-                    try:
-                        line = line.decode('utf-8').strip()
-                        if line == "data: [DONE]":
-                            break
-                        if line.startswith('data: '):
-                            data = line[6:].strip()
-                            delta = json.loads(data)['choices'][0]['delta']
-                            content = delta.get('content')
-                            reasoning_content = delta.get('reasoning_content')
-                            
-                            # 输出推理内容
-                            if reasoning_content:
-                                yield reasoning_content
-                            # 输出正文内容
-                            elif content:
-                                # 如果是第一次收到正文内容
-                                if not reasoning_content_end_flag:
-                                    yield "\n</think>\n"
-                                    reasoning_content_end_flag = True
-                                yield content
-                    except Exception as e:
-                        print(f"错误处理流式响应: {e}")
-                        continue
+        # 获取实际的超时设置
+        actual_timeout = timeout or aiohttp.ClientTimeout(total=300)
+        
+        # 创建ClientSession时设置合理的超时
+        async with aiohttp.ClientSession(timeout=actual_timeout) as session:
+            try:
+                # 设置请求超时
+                async with session.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=self.headers,
+                    json=payload,
+                    timeout=actual_timeout
+                ) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        raise Exception(f"DeepSeek API错误: {response.status} - {error_text}")
+                    
+                    # 先输出<think>标签
+                    yield "<think>"
+                    
+                    # 处理流式响应
+                    async for line in response.content:
+                        try:
+                            line = line.decode('utf-8').strip()
+                            if line == "data: [DONE]":
+                                break
+                            if line.startswith('data: '):
+                                data = line[6:].strip()
+                                delta = json.loads(data)['choices'][0]['delta']
+                                content = delta.get('content')
+                                reasoning_content = delta.get('reasoning_content')
+                                
+                                # 输出推理内容
+                                if reasoning_content:
+                                    yield reasoning_content
+                                # 输出正文内容
+                                elif content:
+                                    # 如果是第一次收到正文内容
+                                    if not reasoning_content_end_flag:
+                                        yield "\n</think>\n"
+                                        reasoning_content_end_flag = True
+                                    yield content
+                        except Exception as e:
+                            print(f"错误处理流式响应: {e}")
+                            # 继续处理下一行，不中断整个流
+                            continue
+            except asyncio.TimeoutError:
+                print("AI请求超时")
+                yield "\n\n生成训练建议超时，请重试。"
+            except Exception as e:
+                print(f"AI请求异常: {e}")
+                import traceback
+                print(f"错误堆栈: {traceback.format_exc()}")
+                yield f"\n\nAI请求出错: {str(e)}"
 
 # 单例模式
 ai_service = AIService()

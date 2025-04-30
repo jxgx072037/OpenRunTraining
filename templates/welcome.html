@@ -5,29 +5,21 @@
 {% block extra_css %}
 <style>
     .welcome-section {
-        min-height: 70vh;
+        min-height: 80vh;
         display: flex;
         align-items: center;
+        justify-content: center;
         padding: 2rem 0;
     }
     
     .welcome-card {
         border-radius: 12px;
         box-shadow: 0 4px 15px rgba(0,0,0,0.08);
-        padding: 3rem 2rem;
+        padding: 4rem 2rem;
         background-color: white;
-    }
-    
-    .feature-item {
-        display: flex;
-        align-items: center;
-        margin-bottom: 1rem;
-    }
-    
-    .feature-icon {
-        font-size: 1.2rem;
-        margin-right: 1rem;
-        color: #FC4C02;
+        text-align: center;
+        max-width: 600px;
+        margin: 0 auto;
     }
     
     .login-btn {
@@ -36,6 +28,7 @@
         font-weight: 600;
         border-radius: 50px;
         transition: all 0.3s;
+        margin-top: 2rem;
     }
     
     .login-btn:hover {
@@ -43,22 +36,18 @@
         box-shadow: 0 4px 12px rgba(252, 76, 2, 0.3);
     }
     
-    .arrow-flow {
-        position: relative;
-        margin: 2rem 0;
+    .about-link {
+        margin-top: 1.5rem;
+        display: inline-block;
+        font-size: 0.95rem;
+        color: #6c757d;
+        text-decoration: none;
+        transition: color 0.2s;
     }
     
-    .arrow-flow::after {
-        content: '';
-        position: absolute;
-        bottom: -30px;
-        left: 50%;
-        transform: translateX(-50%);
-        width: 0;
-        height: 0;
-        border-left: 15px solid transparent;
-        border-right: 15px solid transparent;
-        border-top: 15px solid #FC4C02;
+    .about-link:hover {
+        color: #FC4C02;
+        text-decoration: underline;
     }
 </style>
 {% endblock %}
@@ -66,38 +55,19 @@
 {% block content %}
 <div class="welcome-section">
     <div class="container">
-        <div class="row justify-content-center">
-            <div class="col-md-10">
-                <div class="welcome-card text-center">
-                    <h1 class="display-4 mb-4 fw-bold">欢迎来到OpenRunTraining</h1>
-                    
-                    <p class="lead mb-5">OpenRunTraining是一个<a href="https://github.com/jxgx072037/OpenRunTraining">开源项目</a>，目标是建设一个AI训练助手，提高你的越野跑运动表现。</p>
-                    
-                    <div class="arrow-flow">
-                        <div class="card shadow-sm p-4 mb-5">
-                            <h5 class="mb-4">截止到2025年4月29日，已支持：</h4>
-                            
-                            <div class="row justify-content-center">
-                                <div class="col-md-8">
-                                    <div class="feature-item">
-                                        <i class="fas fa-check-circle feature-icon"></i>
-                                        <span>授权登录你的Strava账户，获取运动数据</span>
-                                    </div>
-                                    <div class="feature-item">
-                                        <i class="fas fa-check-circle feature-icon"></i>
-                                        <span>根据目标比赛的运动轨迹.gpx文件和比赛日期，使用DeepSeek-R1给出训练计划</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="mt-5">
-                        <a href="{{ url_for('authorize') }}" class="btn btn-strava btn-lg login-btn">
-                            <i class="fab fa-strava me-2"></i>登录Strava，获取运动数据
-                        </a>
-                    </div>
-                </div>
+        <div class="welcome-card">
+            <h1 class="display-4 mb-4 fw-bold">欢迎来到OpenRunTraining</h1>
+            
+            <p class="lead mb-4">你的AI跑步训练助手，提高越野跑运动表现</p>
+            
+            <a href="{{ url_for('authorize') }}" class="btn btn-strava btn-lg login-btn">
+                <i class="fab fa-strava me-2"></i>登录Strava，开始训练
+            </a>
+            
+            <div>
+                <a href="{{ url_for('about') }}" class="about-link">
+                    <i class="fas fa-info-circle me-1"></i>关于本项目
+                </a>
             </div>
         </div>
     </div>

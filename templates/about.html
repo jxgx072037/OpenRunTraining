@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block title %}关于OpenRunTraining{% endblock %}
+
+{% block extra_css %}
+<style>
+    .about-section {
+        min-height: 70vh;
+        padding: 2rem 0;
+    }
+    
+    .about-card {
+        border-radius: 12px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+        padding: 3rem 2rem;
+        background-color: white;
+        margin-bottom: 2rem;
+    }
+    
+    .feature-item {
+        display: flex;
+        align-items: center;
+        margin-bottom: 1rem;
+    }
+    
+    .feature-icon {
+        font-size: 1.2rem;
+        margin-right: 1rem;
+        color: #FC4C02;
+    }
+    
+    .arrow-flow {
+        position: relative;
+        margin: 2rem 0;
+    }
+    
+    .arrow-flow::after {
+        content: '';
+        position: absolute;
+        bottom: -30px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 0;
+        height: 0;
+        border-left: 15px solid transparent;
+        border-right: 15px solid transparent;
+        border-top: 15px solid #FC4C02;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="about-section">
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-md-10">
+                <div class="about-card text-center">
+                    <h1 class="display-4 mb-4 fw-bold">关于OpenRunTraining</h1>
+                    
+                    <p class="lead mb-5">OpenRunTraining是一个<a href="https://github.com/jxgx072037/OpenRunTraining">开源项目</a>，目标是建设一个AI训练助手，提高你的越野跑运动表现。</p>
+                    
+                    <div class="arrow-flow">
+                        <div class="card shadow-sm p-4 mb-5">
+                            <h5 class="mb-4">截止到2025年4月29日，已支持：</h5>
+                            <div class="row justify-content-center">
+                                <div class="col-md-8">
+                                    <div class="feature-item">
+                                        <i class="fas fa-check-circle feature-icon"></i>
+                                        <span>授权登录你的Strava账户，获取运动数据</span>
+                                    </div>
+                                    <div class="feature-item">
+                                        <i class="fas fa-check-circle feature-icon"></i>
+                                        <span>根据目标比赛的运动轨迹.gpx文件和比赛日期，使用DeepSeek-R1给出训练计划</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="about-card text-center">
+                    <div class="row justify-content-center">
+                        <div class="col-lg-10">
+                            <div class="card shadow-sm">
+                                <div class="card-body p-4">
+                                    <pre class="mb-0" style="font-family: 'Consolas', monospace; line-height: 1.6; background-color: #f8f9fa; padding: 1.5rem; border-radius: 6px; font-size: 0.95rem;">
+<span style="color: #555;">后续开发计划（2025年5月1日-2025年5月31日）</span>
+
+<span style="color: #0366d6;">补给计划</span>
+支持根据气温、比赛距离、体重等设定赛前、赛中和赛后补给计划，以及如何在训练中对补给计划进行适应
+
+<span style="color: #0366d6;">短期训练计划</span>
+支持生成短期计划-以天为颗粒度，支持设置计划是否生效，根据计划对单次训练做出提醒、评价、鼓励和反馈
+
+<span style="color: #0366d6;">模型自定义</span>
+支持用户自定义模型，支持使用Plan策略调用LLM，目前暂时只是单次调用DeepSeek-R1</pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="about-card">
+                    <h3 class="mb-4">团队与贡献</h3>
+                    <p>OpenRunTraining是由一群热爱跑步和技术的开发者（实际上暂时只有作者一个人= =）共同创建的开源项目。我们致力于将AI技术应用于运动训练领域，帮助跑者提高训练效果和比赛表现。</p>
+                    
+                    <div class="mt-4">
+                        <h5>如何参与贡献</h5>
+                        <p>我们欢迎各种形式的贡献，包括但不限于：</p>
+                        <ul class="text-start">
+                            <li>代码贡献与功能开发</li>
+                            <li>文档改进与翻译</li>
+                            <li>问题反馈与bug修复</li>
+                            <li>用户体验建议</li>
+                            <li>训练理论与知识贡献</li>
+                        </ul>
+                        
+                        <div class="mt-3">
+                            <a href="https://github.com/jxgx072037/OpenRunTraining" class="btn btn-outline-dark" target="_blank">
+                                <i class="fab fa-github me-2"></i>访问GitHub仓库
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 
